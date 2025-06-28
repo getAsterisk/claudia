@@ -243,6 +243,12 @@ fn create_command_with_env(program: &str) -> Command {
             || key == "NVM_BIN"
             || key == "HOMEBREW_PREFIX"
             || key == "HOMEBREW_CELLAR"
+            // Pass AWS related environment variables (for Bedrock)
+            || key.starts_with("AWS_") 
+            // Pass Anthropic API related environment variables
+            || key.starts_with("ANTHROPIC_")
+            // Pass Claude Code usage flags
+            || key.starts_with("CLAUDE_CODE_")
         {
             log::debug!("Inheriting env var: {}={}", key, value);
             tokio_cmd.env(&key, &value);
@@ -799,6 +805,9 @@ pub async fn execute_claude_code(
         model
     );
 
+    // Check if AWS Bedrock mode is enabled
+    let use_aws_bedrock = std::env::var("CLAUDE_CODE_USE_BEDROCK").unwrap_or_default() == "1";
+
     // Check if sandboxing should be used
     let use_sandbox = should_use_sandbox(&app)?;
 
@@ -810,10 +819,20 @@ pub async fn execute_claude_code(
     };
 
     cmd.arg("-p")
-        .arg(&prompt)
-        .arg("--model")
-        .arg(&model)
-        .arg("--output-format")
+        .arg(&prompt);
+    
+    // Only add model argument if not using AWS Bedrock
+    // When AWS Bedrock is enabled, we rely on the ANTHROPIC_MODEL environment variable
+    if !use_aws_bedrock {
+        log::info!("Using standard model selection: {}", model);
+        cmd.arg("--model")
+           .arg(&model);
+    } else {
+        log::info!("Using AWS Bedrock mode - model parameter omitted to use ANTHROPIC_MODEL from environment");
+    }
+    
+    // Add remaining arguments
+    cmd.arg("--output-format")
         .arg("stream-json")
         .arg("--verbose")
         .arg("--dangerously-skip-permissions")

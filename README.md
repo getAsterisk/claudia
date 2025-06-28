@@ -41,6 +41,7 @@ Think of Claudia as your command center for Claude Code - bridging the gap betwe
   - [📊 Usage Analytics Dashboard](#-usage-analytics-dashboard)
   - [🔌 MCP Server Management](#-mcp-server-management)
   - [⏰ Timeline & Checkpoints](#-timeline--checkpoints)
+  - [☁️ AWS Bedrock Support](#aws-bedrock-integration)
   - [📝 CLAUDE.md Management](#-claudemd-management)
 - [📖 Usage](#-usage)
   - [Getting Started](#getting-started)
@@ -95,6 +96,12 @@ Think of Claudia as your command center for Claude Code - bridging the gap betwe
 - **Fork Sessions**: Create new branches from existing checkpoints
 - **Diff Viewer**: See exactly what changed between checkpoints
 
+### ☁️ **AWS Bedrock Support**
+- **Simple Configuration**: Use Claude models via AWS Bedrock with a simple toggle
+- **Environment Variables**: Set up AWS credentials and Bedrock model IDs
+- **Advanced Model Support**: Use any Claude model available in AWS Bedrock
+- **Secure Credential Handling**: AWS credentials passed securely to Claude processes
+
 ### 📝 **CLAUDE.md Management**
 - **Built-in Editor**: Edit CLAUDE.md files directly within the app
 - **Live Preview**: See your markdown rendered in real-time
@@ -108,6 +115,25 @@ Think of Claudia as your command center for Claude Code - bridging the gap betwe
 1. **Launch Claudia**: Open the application after installation
 2. **Welcome Screen**: Choose between CC Agents or CC Projects
 3. **First Time Setup**: Claudia will automatically detect your `~/.claude` directory
+
+### AWS Bedrock Integration
+
+Claudia supports using Claude models via AWS Bedrock:
+
+1. **Configure Environment Variables**: In Settings → Environment, add the following:
+   ```
+   AWS_ACCESS_KEY_ID=your_aws_access_key
+   AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+   AWS_REGION=us-east-1
+   ANTHROPIC_MODEL=us.anthropic.claude-3-7-sonnet-20250219-v1:0
+   ```
+
+2. **Enable AWS Bedrock Mode**: Go to Settings → General and turn on "Use AWS Bedrock"
+
+3. **Start Using AWS Models**: When this setting is enabled, Claudia will:
+   - Pass AWS credentials to Claude processes
+   - Use the model specified in your environment variables
+   - Skip sending model parameters that could conflict with AWS Bedrock
 
 ### Managing Projects
 
