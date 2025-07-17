@@ -288,6 +288,18 @@ fn create_sidecar_command(
     // Set working directory
     sidecar_cmd = sidecar_cmd.current_dir(project_path);
     
+    // Pass through proxy environment variables if they exist (only uppercase)
+    for (key, value) in std::env::vars() {
+        if key == "HTTP_PROXY"
+            || key == "HTTPS_PROXY"
+            || key == "NO_PROXY"
+            || key == "ALL_PROXY"
+        {
+            log::debug!("Setting proxy env var for sidecar: {}={}", key, value);
+            sidecar_cmd = sidecar_cmd.env(&key, &value);
+        }
+    }
+    
     Ok(sidecar_cmd)
 }
 
