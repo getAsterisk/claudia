@@ -48,6 +48,10 @@
   border-color: var(--color-border);
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
@@ -556,115 +560,57 @@ button:focus-visible,
   z-index: 1;
 }
 
-/* --- THEME-MATCHING SCROLLBARS --- */
+/* --- ELEGANT SCROLLBARS --- */
 
-/* For Firefox */
+/* Firefox - thin and minimal */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-muted-foreground) var(--color-background);
+  scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
 }
 
-/* For Webkit Browsers (Chrome, Safari, Edge) */
-*::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+/* Global webkit scrollbar - ultra thin and elegant */
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
 }
 
-*::-webkit-scrollbar-track {
-  background: var(--color-background);
-}
-
-*::-webkit-scrollbar-thumb {
-  background-color: var(--color-muted);
-  border-radius: 6px;
-  border: 3px solid var(--color-background);
-}
-
-*::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-muted-foreground);
-}
-
-*::-webkit-scrollbar-corner {
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Code blocks and editors specific scrollbar */
+::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 2px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.6);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Code blocks - slightly larger for better usability */
 pre::-webkit-scrollbar,
 .w-md-editor-content::-webkit-scrollbar,
-code::-webkit-scrollbar,
-.overflow-auto::-webkit-scrollbar {
+code::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 pre::-webkit-scrollbar-thumb,
 .w-md-editor-content::-webkit-scrollbar-thumb,
-code::-webkit-scrollbar-thumb,
-.overflow-auto::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 114, 128, 0.2);
+code::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.4);
+  border-radius: 4px;
 }
 
 pre::-webkit-scrollbar-thumb:hover,
 .w-md-editor-content::-webkit-scrollbar-thumb:hover,
-code::-webkit-scrollbar-thumb:hover,
-.overflow-auto::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(107, 114, 128, 0.4);
-}
-
-/* Syntax highlighter specific */
-.bg-zinc-950 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.bg-zinc-950 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.bg-zinc-950 ::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 114, 128, 0.3);
-  border-radius: 4px;
-}
-
-.bg-zinc-950 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(107, 114, 128, 0.5);
-}
-
-/* Code preview specific scrollbar */
-.code-preview-scroll::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
-
-.code-preview-scroll::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-}
-
-.code-preview-scroll::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 114, 128, 0.4);
-  border-radius: 6px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-
-.code-preview-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(107, 114, 128, 0.6);
-}
-
-.code-preview-scroll::-webkit-scrollbar-thumb:active {
-  background-color: rgba(107, 114, 128, 0.8);
-}
-
-.code-preview-scroll::-webkit-scrollbar-corner {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-}
-
-/* Firefox scrollbar for code preview */
-.code-preview-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(107, 114, 128, 0.4) rgba(0, 0, 0, 0.2);
+code::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.6);
 }
 
 /* NFO Credits Scanlines Animation */
