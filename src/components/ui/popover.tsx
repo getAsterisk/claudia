@@ -2,6 +2,9 @@ import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
+/**
+ * Props interface for the Popover component
+ */
 interface PopoverProps {
   /**
    * The trigger element
@@ -35,13 +38,41 @@ interface PopoverProps {
 
 /**
  * Popover component for displaying floating content
- * 
+ *
+ * A floating content container that appears relative to a trigger element.
+ * Supports controlled and uncontrolled modes, keyboard navigation, and
+ * click-outside-to-close behavior. Includes smooth animations and flexible positioning.
+ *
+ * @param trigger - Element that triggers the popover when clicked
+ * @param content - Content to display inside the popover
+ * @param open - Controlled open state (optional)
+ * @param onOpenChange - Callback when open state changes
+ * @param className - Additional CSS classes for the content
+ * @param align - Horizontal alignment relative to trigger
+ * @param side - Vertical position relative to trigger
+ *
  * @example
+ * ```tsx
  * <Popover
- *   trigger={<Button>Click me</Button>}
- *   content={<div>Popover content</div>}
- *   side="top"
+ *   trigger={<Button>Show Menu</Button>}
+ *   content={
+ *     <div className="space-y-2">
+ *       <button>Option 1</button>
+ *       <button>Option 2</button>
+ *     </div>
+ *   }
+ *   side="bottom"
+ *   align="start"
  * />
+ *
+ * // Controlled popover
+ * <Popover
+ *   trigger={<Button>Settings</Button>}
+ *   content={<SettingsPanel />}
+ *   open={isOpen}
+ *   onOpenChange={setIsOpen}
+ * />
+ * ```
  */
 export const Popover: React.FC<PopoverProps> = ({
   trigger,
@@ -55,14 +86,14 @@ export const Popover: React.FC<PopoverProps> = ({
   const [internalOpen, setInternalOpen] = React.useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = onOpenChange || setInternalOpen;
-  
+
   const triggerRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
-  
+
   // Close on click outside
   React.useEffect(() => {
     if (!open) return;
-    
+
     const handleClickOutside = (event: MouseEvent) => {
       if (
         triggerRef.current &&
@@ -73,43 +104,40 @@ export const Popover: React.FC<PopoverProps> = ({
         setOpen(false);
       }
     };
-    
+
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open, setOpen]);
-  
+
   // Close on escape
   React.useEffect(() => {
     if (!open) return;
-    
+
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpen(false);
       }
     };
-    
+
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [open, setOpen]);
-  
+
   const alignClass = {
     start: "left-0",
     center: "left-1/2 -translate-x-1/2",
     end: "right-0",
   }[align];
-  
+
   const sideClass = side === "top" ? "bottom-full mb-2" : "top-full mt-2";
   const animationY = side === "top" ? { initial: 10, exit: 10 } : { initial: -10, exit: -10 };
-  
+
   return (
     <div className="relative inline-block">
-      <div
-        ref={triggerRef}
-        onClick={() => setOpen(!open)}
-      >
+      <div ref={triggerRef} onClick={() => setOpen(!open)}>
         {trigger}
       </div>
-      
+
       <AnimatePresence>
         {open && (
           <motion.div
@@ -131,4 +159,4 @@ export const Popover: React.FC<PopoverProps> = ({
       </AnimatePresence>
     </div>
   );
-}; 
+};

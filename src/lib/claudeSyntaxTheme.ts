@@ -3,11 +3,11 @@ import { ThemeMode } from '@/contexts/ThemeContext';
 /**
  * Claude-themed syntax highlighting theme factory
  * Returns different syntax themes based on the current theme mode
- * 
+ *
  * @param theme - The current theme mode
  * @returns Prism syntax highlighting theme object
  */
-export const getClaudeSyntaxTheme = (theme: ThemeMode): any => {
+export const getClaudeSyntaxTheme = (theme: ThemeMode): { [key: string]: React.CSSProperties } => {
   const themes = {
     dark: {
       base: '#e3e8f0',
@@ -124,8 +124,8 @@ export const getClaudeSyntaxTheme = (theme: ThemeMode): any => {
       overflow: 'auto',
     },
     ':not(pre) > code[class*="language-"]': {
-      background: theme === 'light' 
-        ? 'rgba(139, 92, 246, 0.1)' 
+      background: theme === 'light'
+        ? 'rgba(139, 92, 246, 0.1)'
         : 'rgba(139, 92, 246, 0.1)',
       padding: '0.1em 0.3em',
       borderRadius: '0.3em',

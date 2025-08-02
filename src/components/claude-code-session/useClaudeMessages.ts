@@ -1,63 +1,117 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { api } from '@/lib/api';
-import type { ClaudeStreamMessage } from '../AgentExecution';
+import { useState, useCallback, useRef, useEffect } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { api } from "@/lib/api";
+import { logger } from "@/lib/logger";
+import type { ClaudeStreamMessage } from "../AgentExecution";
 
+/**
+ * Configuration options for the useClaudeMessages hook
+ */
 interface UseClaudeMessagesOptions {
   onSessionInfo?: (info: { sessionId: string; projectId: string }) => void;
   onTokenUpdate?: (tokens: number) => void;
   onStreamingChange?: (isStreaming: boolean, sessionId: string | null) => void;
 }
 
+/**
+ * React hook for managing Claude Code streaming messages
+ *
+ * Handles real-time streaming of Claude Code messages with automatic
+ * event listening, message parsing, and state management. Provides
+ * functionality for loading historical messages and managing streaming state.
+ *
+ * @param options - Configuration options for message handling
+ * @returns Object containing message state and management functions
+ *
+ * @example
+ * ```tsx
+ * function ClaudeSession() {
+ *   const {
+ *     messages,
+ *     isStreaming,
+ *     currentSessionId,
+ *     clearMessages,
+ *     loadMessages
+ *   } = useClaudeMessages({
+ *     onSessionInfo: (info) => setSessionInfo(info),
+ *     onTokenUpdate: (tokens) => setTotalTokens(tokens),
+ *     onStreamingChange: (streaming, sessionId) => {
+ *       setIsStreaming(streaming);
+ *       setActiveSession(sessionId);
+ *     }
+ *   });
+ *
+ *   return (
+ *     <div>
+ *       <div>Status: {isStreaming ? 'Streaming...' : 'Idle'}</div>
+ *       <div>Session: {currentSessionId}</div>
+ *       <div>Messages: {messages.length}</div>
+ *       <button onClick={clearMessages}>Clear Messages</button>
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
 export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  
+
   const eventListenerRef = useRef<UnlistenFn | null>(null);
   const accumulatedContentRef = useRef<{ [key: string]: string }>({});
 
-  const handleMessage = useCallback((message: ClaudeStreamMessage) => {
-    if ((message as any).type === "start") {
-      // Clear accumulated content for new stream
-      accumulatedContentRef.current = {};
-      setIsStreaming(true);
-      options.onStreamingChange?.(true, currentSessionId);
-    } else if ((message as any).type === "partial") {
-      if (message.tool_calls && message.tool_calls.length > 0) {
-        message.tool_calls.forEach((toolCall: any) => {
-          if (toolCall.content && toolCall.partial_tool_call_index !== undefined) {
-            const key = `tool-${toolCall.partial_tool_call_index}`;
-            if (!accumulatedContentRef.current[key]) {
-              accumulatedContentRef.current[key] = "";
+  const handleMessage = useCallback(
+    (message: ClaudeStreamMessage) => {
+      if ((message as Record<string, unknown>).type === "start") {
+        // Clear accumulated content for new stream
+        accumulatedContentRef.current = {};
+        setIsStreaming(true);
+        options.onStreamingChange?.(true, currentSessionId);
+      } else if ((message as Record<string, unknown>).type === "partial") {
+        const messageWithTools = message as { tool_calls?: Array<Record<string, unknown>> };
+        if (messageWithTools.tool_calls && messageWithTools.tool_calls.length > 0) {
+          messageWithTools.tool_calls.forEach((toolCall: Record<string, unknown>) => {
+            if (toolCall.content && toolCall.partial_tool_call_index !== undefined) {
+              const key = `tool-${toolCall.partial_tool_call_index}`;
+              if (!accumulatedContentRef.current[key]) {
+                accumulatedContentRef.current[key] = "";
+              }
+              accumulatedContentRef.current[key] += toolCall.content;
+              toolCall.accumulated_content = accumulatedContentRef.current[key];
             }
-            accumulatedContentRef.current[key] += toolCall.content;
-            toolCall.accumulated_content = accumulatedContentRef.current[key];
-          }
-        });
+          });
+        }
+      } else if (
+        (message as Record<string, unknown>).type === "response" &&
+        message.message?.usage
+      ) {
+        const totalTokens =
+          (message.message.usage.input_tokens || 0) + (message.message.usage.output_tokens || 0);
+        options.onTokenUpdate?.(totalTokens);
+      } else if (
+        (message as Record<string, unknown>).type === "error" ||
+        (message as Record<string, unknown>).type === "response"
+      ) {
+        setIsStreaming(false);
+        options.onStreamingChange?.(false, currentSessionId);
       }
-    } else if ((message as any).type === "response" && message.message?.usage) {
-      const totalTokens = (message.message.usage.input_tokens || 0) + 
-                         (message.message.usage.output_tokens || 0);
-      options.onTokenUpdate?.(totalTokens);
-    } else if ((message as any).type === "error" || (message as any).type === "response") {
-      setIsStreaming(false);
-      options.onStreamingChange?.(false, currentSessionId);
-    }
 
-    setMessages(prev => [...prev, message]);
-    setRawJsonlOutput(prev => [...prev, JSON.stringify(message)]);
+      setMessages((prev) => [...prev, message]);
+      setRawJsonlOutput((prev) => [...prev, JSON.stringify(message)]);
 
-    // Extract session info
-    if ((message as any).type === "session_info" && (message as any).session_id && (message as any).project_id) {
-      options.onSessionInfo?.({
-        sessionId: (message as any).session_id,
-        projectId: (message as any).project_id
-      });
-      setCurrentSessionId((message as any).session_id);
-    }
-  }, [currentSessionId, options]);
+      // Extract session info
+      const msgObj = message as Record<string, unknown>;
+      if (msgObj.type === "session_info" && msgObj.session_id && msgObj.project_id) {
+        options.onSessionInfo?.({
+          sessionId: msgObj.session_id as string,
+          projectId: msgObj.project_id as string,
+        });
+        setCurrentSessionId(msgObj.session_id as string);
+      }
+    },
+    [currentSessionId, options]
+  );
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -72,26 +126,26 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
       const outputs = [{ jsonl: output }];
       const loadedMessages: ClaudeStreamMessage[] = [];
       const loadedRawJsonl: string[] = [];
-      
-      outputs.forEach(output => {
+
+      outputs.forEach((output) => {
         if (output.jsonl) {
-          const lines = output.jsonl.split('\n').filter(line => line.trim());
-          lines.forEach(line => {
+          const lines = output.jsonl.split("\n").filter((line) => line.trim());
+          lines.forEach((line) => {
             try {
               const msg = JSON.parse(line);
               loadedMessages.push(msg);
               loadedRawJsonl.push(line);
-            } catch (e) {
-              console.error("Failed to parse JSONL:", e);
+            } catch (_e) {
+              logger.error("Failed to parse JSONL:", _e);
             }
           });
         }
       });
-      
+
       setMessages(loadedMessages);
       setRawJsonlOutput(loadedRawJsonl);
     } catch (error) {
-      console.error("Failed to load session outputs:", error);
+      logger.error("Failed to load session outputs:", error);
       throw error;
     }
   }, []);
@@ -102,13 +156,13 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
       if (eventListenerRef.current) {
         eventListenerRef.current();
       }
-      
+
       eventListenerRef.current = await listen<string>("claude-stream", (event) => {
         try {
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
           handleMessage(message);
         } catch (error) {
-          console.error("Failed to parse Claude stream message:", error);
+          logger.error("Failed to parse Claude stream message:", error);
         }
       });
     };
@@ -129,6 +183,6 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
     currentSessionId,
     clearMessages,
     loadMessages,
-    handleMessage
+    handleMessage,
   };
 }

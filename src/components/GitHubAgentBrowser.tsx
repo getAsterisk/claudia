@@ -1,25 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Search,
-  Download,
-  Loader2,
-  AlertCircle,
-  Eye,
-  Check,
-  Globe,
-  FileJson,
-} from "lucide-react";
+import { Search, Download, Loader2, AlertCircle, Eye, Check, Globe, FileJson } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api, type GitHubAgentFile, type AgentExport, type Agent } from "@/lib/api";
-import { type AgentIconName } from "./CCAgents";
-import { ICON_MAP } from "./IconPicker";
+import { AGENT_ICONS } from "@/constants/agentIcons";
 import { open } from "@tauri-apps/plugin-shell";
-
+import { handleError } from "@/lib/errorHandler";
+/**
+ * Props interface for the GitHubAgentBrowser component
+ */
 interface GitHubAgentBrowserProps {
   isOpen: boolean;
   onClose: () => void;
@@ -33,6 +26,28 @@ interface AgentPreview {
   error: string | null;
 }
 
+/**
+ * GitHubAgentBrowser component for browsing and importing agents from GitHub
+ *
+ * A comprehensive browser interface for discovering and importing Claude Code
+ * agents from GitHub repositories. Features include search, filtering, preview,
+ * and one-click import functionality with validation and error handling.
+ *
+ * @param onBack - Callback to return to the previous view
+ * @param onAgentImported - Callback when an agent is successfully imported
+ * @param className - Additional CSS classes for styling
+ *
+ * @example
+ * ```tsx
+ * <GitHubAgentBrowser
+ *   onBack={() => setView('agents')}
+ *   onAgentImported={(agent) => {
+ *     console.log('Imported agent:', agent.name);
+ *     showToast('Agent imported successfully!', 'success');
+ *   }}
+ * />
+ * ```
+ */
 export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
   isOpen,
   onClose,
@@ -58,7 +73,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
       const agents = await api.listAgents();
       setExistingAgents(agents);
     } catch (err) {
-      console.error("Failed to fetch existing agents:", err);
+      await handleError("Failed to fetch existing agents:", { context: err });
     }
   };
 
@@ -69,7 +84,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
       const agentFiles = await api.fetchGitHubAgents();
       setAgents(agentFiles);
     } catch (err) {
-      console.error("Failed to fetch GitHub agents:", err);
+      await handleError("Failed to fetch GitHub agents:", { context: err });
       setError("Failed to fetch agents from GitHub. Please check your internet connection.");
     } finally {
       setLoading(false);
@@ -93,7 +108,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
         error: null,
       });
     } catch (err) {
-      console.error("Failed to fetch agent content:", err);
+      await handleError("Failed to fetch agent content:", { context: err });
       setSelectedAgent({
         file,
         data: null,
@@ -105,9 +120,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
 
   const isAgentImported = (fileName: string) => {
     const agentName = getAgentDisplayName(fileName);
-    return existingAgents.some(agent => 
-      agent.name.toLowerCase() === agentName.toLowerCase()
-    );
+    return existingAgents.some((agent) => agent.name.toLowerCase() === agentName.toLowerCase());
   };
 
   const handleImportAgent = async () => {
@@ -116,36 +129,46 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
     try {
       setImporting(true);
       await api.importAgentFromGitHub(selectedAgent.file.download_url);
-      
+
       // Refresh existing agents list
       await fetchExistingAgents();
-      
+
       // Close preview
       setSelectedAgent(null);
-      
+
       // Notify parent
       onImportSuccess();
     } catch (err) {
-      console.error("Failed to import agent:", err);
-      alert(`Failed to import agent: ${err instanceof Error ? err.message : "Unknown error"}`);
+      await handleError("Failed to import agent:", { context: err });
+      globalThis.alert(
+        `Failed to import agent: ${err instanceof Error ? err.message : "Unknown error"}`
+      );
     } finally {
       setImporting(false);
     }
   };
 
-  const filteredAgents = agents.filter(agent =>
+  const filteredAgents = agents.filter((agent) =>
     agent.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getAgentDisplayName = (fileName: string) => {
-    return fileName.replace(".claudia.json", "").replace(/-/g, " ")
+    return fileName
+      .replace(".claudia.json", "")
+      .replace(/-/g, " ")
       .split(" ")
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
   };
 
+  /**
+   * Render agent icon component
+   *
+   * @param iconName - Name of the icon to render
+   * @returns React icon component
+   */
   const renderIcon = (iconName: string) => {
-    const Icon = ICON_MAP[iconName as AgentIconName] || ICON_MAP.bot;
+    const Icon = AGENT_ICONS[iconName] || AGENT_ICONS.bot;
     return <Icon className="h-8 w-8" />;
   };
 
@@ -154,7 +177,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
     try {
       await open("https://github.com/getAsterisk/claudia/tree/main/cc_agents");
     } catch (error) {
-      console.error('Failed to open GitHub link:', error);
+      await handleError("Failed to open GitHub link:", { context: error });
     }
   };
 
@@ -231,15 +254,17 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ duration: 0.2, delay: index * 0.05 }}
                     >
-                      <Card className="h-full hover:shadow-lg transition-shadow cursor-pointer"
-                            onClick={() => handlePreviewAgent(agent)}>
+                      <Card
+                        className="h-full hover:shadow-lg transition-shadow cursor-pointer"
+                        onClick={() => handlePreviewAgent(agent)}
+                      >
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex items-center gap-3 flex-1">
                               <div className="p-2 rounded-lg bg-primary/10 text-primary flex-shrink-0">
                                 {/* Default to bot icon for now, will be loaded from preview */}
                                 {(() => {
-                                  const Icon = ICON_MAP.bot;
+                                  const Icon = AGENT_ICONS.bot;
                                   return <Icon className="h-6 w-6" />;
                                 })()}
                               </div>
@@ -309,9 +334,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
                         {renderIcon(selectedAgent.data.agent.icon)}
                       </div>
                       <div className="flex-1">
-                        <h3 className="text-lg font-semibold">
-                          {selectedAgent.data.agent.name}
-                        </h3>
+                        <h3 className="text-lg font-semibold">{selectedAgent.data.agent.name}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           <Badge variant="outline">{selectedAgent.data.agent.model}</Badge>
                         </div>
@@ -338,12 +361,12 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
                       </div>
                     )}
 
-
-
                     {/* Metadata */}
                     <div className="text-xs text-muted-foreground">
                       <p>Version: {selectedAgent.data.version}</p>
-                      <p>Exported: {new Date(selectedAgent.data.exported_at).toLocaleDateString()}</p>
+                      <p>
+                        Exported: {new Date(selectedAgent.data.exported_at).toLocaleDateString()}
+                      </p>
                     </div>
                   </div>
                 ) : null}
@@ -352,10 +375,7 @@ export const GitHubAgentBrowser: React.FC<GitHubAgentBrowserProps> = ({
               {/* Actions */}
               {selectedAgent.data && (
                 <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
-                  <Button
-                    variant="outline"
-                    onClick={() => setSelectedAgent(null)}
-                  >
+                  <Button variant="outline" onClick={() => setSelectedAgent(null)}>
                     Cancel
                   </Button>
                   <Button

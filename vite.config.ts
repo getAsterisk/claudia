@@ -6,7 +6,7 @@ import { fileURLToPath, URL } from "node:url";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
 
   // Path resolution
@@ -43,18 +43,29 @@ export default defineConfig(async () => ({
     // Increase chunk size warning limit to 2000 KB
     chunkSizeWarningLimit: 2000,
     
+    // development模式下禁用压缩
+    minify: mode === 'development' ? false : 'terser',
+
     rollupOptions: {
       output: {
         // Manual chunks for better code splitting
         manualChunks: {
           // Vendor chunks
-          'react-vendor': ['react', 'react-dom'],
-          'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-select', '@radix-ui/react-tabs', '@radix-ui/react-tooltip', '@radix-ui/react-switch', '@radix-ui/react-popover'],
-          'editor-vendor': ['@uiw/react-md-editor'],
-          'syntax-vendor': ['react-syntax-highlighter'],
+          "react-vendor": ["react", "react-dom"],
+          "ui-vendor": [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-dropdown-menu",
+            "@radix-ui/react-select",
+            "@radix-ui/react-tabs",
+            "@radix-ui/react-tooltip",
+            "@radix-ui/react-switch",
+            "@radix-ui/react-popover",
+          ],
+          "editor-vendor": ["@uiw/react-md-editor"],
+          "syntax-vendor": ["react-syntax-highlighter"],
           // Tauri and other utilities
-          'tauri': ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-shell'],
-          'utils': ['date-fns', 'clsx', 'tailwind-merge'],
+          tauri: ["@tauri-apps/api", "@tauri-apps/plugin-dialog", "@tauri-apps/plugin-shell"],
+          utils: ["date-fns", "clsx", "tailwind-merge"],
         },
       },
     },

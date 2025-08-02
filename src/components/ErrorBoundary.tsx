@@ -2,12 +2,20 @@ import React, { Component, ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { logger } from "@/lib/logger";
+import { handleError } from "@/lib/errorHandler";
 
+/**
+ * Props interface for the ErrorBoundary component
+ */
 interface ErrorBoundaryProps {
   children: ReactNode;
   fallback?: (error: Error, reset: () => void) => ReactNode;
 }
 
+/**
+ * State interface for the ErrorBoundary component
+ */
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
@@ -28,8 +36,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log the error to console
-    console.error("Error caught by boundary:", error, errorInfo);
+    // Use unified error handling
+    handleError(error, {
+      source: "ErrorBoundary",
+      componentStack: errorInfo.componentStack,
+      errorBoundary: true,
+    });
+    // Also log to console for debugging
+    logger.error("Error caught by boundary:", error, errorInfo);
   }
 
   reset = () => {
@@ -65,11 +79,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                       </pre>
                     </details>
                   )}
-                  <Button
-                    onClick={this.reset}
-                    size="sm"
-                    className="mt-4"
-                  >
+                  <Button onClick={this.reset} size="sm" className="mt-4">
                     Try again
                   </Button>
                 </div>
@@ -82,4 +92,4 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     return this.props.children;
   }
-} 
+}

@@ -1,12 +1,26 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, ArrowLeft, Calendar, Clock, MessageSquare } from "lucide-react";
+import { FileText, ArrowLeft, Calendar, Clock, MessageSquare, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import { ClaudeMemoriesDropdown } from "@/components/ClaudeMemoriesDropdown";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { formatUnixTimestamp, formatISOTimestamp, truncateText, getFirstLine } from "@/lib/date-utils";
+import {
+  formatUnixTimestamp,
+  formatISOTimestamp,
+  truncateText,
+  getFirstLine,
+} from "@/lib/date-utils";
+import { useI18n } from "@/lib/i18n";
 import type { Session, ClaudeMdFile } from "@/lib/api";
 
 interface SessionListProps {
@@ -18,6 +32,10 @@ interface SessionListProps {
    * The current project path being viewed
    */
   projectPath: string;
+  /**
+   * The current project ID
+   */
+  projectId: string;
   /**
    * Callback to go back to project list
    */
@@ -31,6 +49,10 @@ interface SessionListProps {
    */
   onEditClaudeFile?: (file: ClaudeMdFile) => void;
   /**
+   * Callback when a session is deleted
+   */
+  onSessionDeleted?: (sessionId: string) => void;
+  /**
    * Optional className for styling
    */
   className?: string;
@@ -40,36 +62,86 @@ const ITEMS_PER_PAGE = 5;
 
 /**
  * SessionList component - Displays paginated sessions for a specific project
- * 
+ *
+ * A comprehensive session listing interface with pagination, animations, and
+ * session management features. Shows session metadata including timestamps,
+ * first message previews, and todo indicators with smooth hover effects.
+ *
+ * @param sessions - Array of sessions to display
+ * @param projectPath - The current project path being viewed
+ * @param onBack - Callback to go back to project list
+ * @param onSessionClick - Callback when a session is clicked
+ * @param onEditClaudeFile - Callback when a CLAUDE.md file should be edited
+ * @param className - Optional className for styling
+ *
  * @example
+ * ```tsx
  * <SessionList
- *   sessions={sessions}
+ *   sessions={projectSessions}
  *   projectPath="/Users/example/project"
  *   onBack={() => setSelectedProject(null)}
- *   onSessionClick={(session) => console.log('Selected session:', session)}
+ *   onSessionClick={(session) => {
+ *     console.log('Opening session:', session.id);
+ *     openSession(session);
+ *   }}
+ *   onEditClaudeFile={(file) => {
+ *     setEditingFile(file);
+ *     setShowEditor(true);
+ *   }}
  * />
+ * ```
  */
 export const SessionList: React.FC<SessionListProps> = ({
   sessions,
   projectPath,
+  projectId,
   onBack,
   onSessionClick,
   onEditClaudeFile,
+  onSessionDeleted,
   className,
 }) => {
+  const { t } = useI18n();
   const [currentPage, setCurrentPage] = useState(1);
-  
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Calculate pagination
   const totalPages = Math.ceil(sessions.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentSessions = sessions.slice(startIndex, endIndex);
-  
+
   // Reset to page 1 if sessions change
   React.useEffect(() => {
     setCurrentPage(1);
   }, [sessions.length]);
-  
+
+  // Handle session deletion
+  const handleDeleteSession = async () => {
+    if (!sessionToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      // Import the API to use deleteSession
+      const { api } = await import("@/lib/api");
+      await api.deleteSession(sessionToDelete.id, projectId);
+      onSessionDeleted?.(sessionToDelete.id);
+    } catch (error) {
+      console.error("Failed to delete session:", error);
+      // You might want to show a toast notification here
+    } finally {
+      setIsDeleting(false);
+      setSessionToDelete(null);
+    }
+  };
+
+  // Handle delete button click
+  const handleDeleteClick = (e: React.MouseEvent, session: Session) => {
+    e.stopPropagation(); // Prevent session click
+    setSessionToDelete(session);
+  };
+
   return (
     <div className={cn("space-y-4", className)}>
       <motion.div
@@ -78,18 +150,13 @@ export const SessionList: React.FC<SessionListProps> = ({
         transition={{ duration: 0.3 }}
         className="flex items-center space-x-3"
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onBack}
-          className="h-8 w-8"
-        >
+        <Button variant="ghost" size="icon" onClick={onBack} className="h-8 w-8">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
           <h2 className="text-base font-medium truncate">{projectPath}</h2>
           <p className="text-xs text-muted-foreground">
-            {sessions.length} session{sessions.length !== 1 ? 's' : ''}
+            {sessions.length} session{sessions.length !== 1 ? "s" : ""}
           </p>
         </div>
       </motion.div>
@@ -101,10 +168,7 @@ export const SessionList: React.FC<SessionListProps> = ({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <ClaudeMemoriesDropdown
-            projectPath={projectPath}
-            onEditFile={onEditClaudeFile}
-          />
+          <ClaudeMemoriesDropdown projectPath={projectPath} onEditFile={onEditClaudeFile} />
         </motion.div>
       )}
 
@@ -125,12 +189,12 @@ export const SessionList: React.FC<SessionListProps> = ({
               <Card
                 className={cn(
                   "transition-all hover:shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer",
-                  session.todo_data && "border-l-4 border-l-primary"
+                  session.todo_data ? "border-l-4 border-l-primary" : ""
                 )}
                 onClick={() => {
                   // Emit a special event for Claude Code session navigation
-                  const event = new CustomEvent('claude-session-selected', { 
-                    detail: { session, projectPath } 
+                  const event = new window.CustomEvent("claude-session-selected", {
+                    detail: { session, projectPath },
                   });
                   window.dispatchEvent(event);
                   onSessionClick?.(session);
@@ -143,7 +207,7 @@ export const SessionList: React.FC<SessionListProps> = ({
                         <FileText className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                         <div className="space-y-1 flex-1 min-w-0">
                           <p className="font-mono text-xs text-muted-foreground">{session.id}</p>
-                          
+
                           {/* First message preview */}
                           {session.first_message && (
                             <div className="space-y-1">
@@ -156,29 +220,38 @@ export const SessionList: React.FC<SessionListProps> = ({
                               </p>
                             </div>
                           )}
-                          
+
                           {/* Metadata */}
                           <div className="flex items-center space-x-3 text-xs text-muted-foreground">
                             {/* Message timestamp if available, otherwise file creation time */}
                             <div className="flex items-center space-x-1">
                               <Clock className="h-3 w-3" />
                               <span>
-                                {session.message_timestamp 
+                                {session.message_timestamp
                                   ? formatISOTimestamp(session.message_timestamp)
-                                  : formatUnixTimestamp(session.created_at)
-                                }
+                                  : formatUnixTimestamp(session.created_at)}
                               </span>
                             </div>
-                            
-                            {session.todo_data && (
+
+                            {session.todo_data ? (
                               <div className="flex items-center space-x-1">
                                 <Calendar className="h-3 w-3" />
                                 <span>Has todo</span>
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       </div>
+                      
+                      {/* Delete button */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        onClick={(e) => handleDeleteClick(e, session)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
@@ -187,12 +260,30 @@ export const SessionList: React.FC<SessionListProps> = ({
           ))}
         </div>
       </AnimatePresence>
-      
-      <Pagination
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={setCurrentPage}
-      />
+
+      <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!sessionToDelete} onOpenChange={(open) => {
+        if (!open) {
+          setSessionToDelete(null);
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t.sessions.deleteSessionConfirm}</DialogTitle>
+            <DialogDescription>
+              {t.sessions.deleteSessionDesc.replace("{sessionId}", sessionToDelete?.id || "")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSessionToDelete(null)}>{t.common.cancel}</Button>
+            <Button variant="destructive" onClick={handleDeleteSession} disabled={isDeleting}>
+              {isDeleting ? t.sessions.deletingSession : t.common.delete}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-}; 
+};

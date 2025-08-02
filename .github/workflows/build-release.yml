@@ -1,0 +1,388 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*" # 触发条件：推送版本标签，如 v1.0.0
+  workflow_dispatch: # 允许手动触发
+    inputs:
+      tag:
+        description: "Release tag (e.g., v1.0.0)"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-release:
+    name: Build Release (${{ matrix.platform.name }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux AppImage
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            artifact-name: linux-x86_64-appimage
+            bundle-type: appimage
+            bundle-pattern: "*.AppImage"
+            file-suffix: appimage
+          - name: Linux DEB
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            artifact-name: linux-x86_64-deb
+            bundle-type: deb
+            bundle-pattern: "*.deb"
+            file-suffix: deb
+          - name: Windows MSI
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            artifact-name: windows-x86_64-msi
+            bundle-type: msi
+            bundle-pattern: "*.msi"
+            file-suffix: msi
+          - name: Windows EXE
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            artifact-name: windows-x86_64-exe
+            bundle-type: nsis
+            bundle-pattern: "*.exe"
+            file-suffix: exe
+          - name: macOS Intel
+            os: macos-latest
+            rust-target: x86_64-apple-darwin
+            artifact-name: macos-x86_64
+            bundle-type: dmg
+            bundle-pattern: "*.dmg"
+            file-suffix: dmg
+          - name: macOS Apple Silicon
+            os: macos-latest
+            rust-target: aarch64-apple-darwin
+            artifact-name: macos-aarch64
+            bundle-type: dmg
+            bundle-pattern: "*.dmg"
+            file-suffix: dmg
+
+    runs-on: ${{ matrix.platform.os }}
+
+    steps:
+      # 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 安装Linux系统依赖
+      - name: Install Linux dependencies
+        if: matrix.platform.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libglib2.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libxdo-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+
+      # 设置Rust工具链
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.rust-target }}
+
+      # 缓存Rust依赖
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: ${{ matrix.platform.os }}-${{ matrix.platform.rust-target }}-rust-${{ hashFiles('**/Cargo.lock') }}
+
+      # 设置Bun
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # 缓存Bun依赖
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun
+            node_modules
+          key: ${{ matrix.platform.os }}-bun-${{ hashFiles('bun.lockb', 'package.json') }}
+          restore-keys: |
+            ${{ matrix.platform.os }}-bun-
+
+      # 安装前端依赖
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      # 构建Claude Code可执行文件
+      - name: Build Claude Code executables
+        run: |
+          if [ "${{ matrix.platform.os }}" = "ubuntu-latest" ]; then
+            bun run build:executables:linux
+          elif [ "${{ matrix.platform.os }}" = "windows-latest" ]; then
+            bun run build:executables:windows
+          elif [ "${{ matrix.platform.os }}" = "macos-latest" ]; then
+            bun run build:executables:macos
+          fi
+        shell: bash
+
+      # 构建前端
+      - name: Build frontend
+        run: bun run build
+
+      # 确保构建目录存在
+      - name: Prepare build directories
+        run: |
+          mkdir -p src-tauri/target/release/bundle
+          echo "📁 创建构建目录完成"
+
+      # 构建Tauri应用程序
+      - name: Build Tauri application
+        run: |
+          if [ "${{ matrix.platform.rust-target }}" = "aarch64-apple-darwin" ]; then
+            bun run tauri build --target ${{ matrix.platform.rust-target }} --bundles ${{ matrix.platform.bundle-type }} --verbose
+          else
+            bun run tauri build --bundles ${{ matrix.platform.bundle-type }} --verbose
+          fi
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # 查找构建产物
+      - name: Find build artifacts
+        id: find-artifacts
+        run: |
+          echo "🔍 查找构建产物..."
+          echo "Bundle type: ${{ matrix.platform.bundle-type }}"
+          echo "Rust target: ${{ matrix.platform.rust-target }}"
+
+          # 显示构建目录结构
+          echo "📁 构建目录结构:"
+          find src-tauri/target -type f -name "*.${{ matrix.platform.bundle-pattern }}" 2>/dev/null || true
+
+          if [ "${{ matrix.platform.bundle-type }}" = "appimage" ]; then
+            BUNDLE_PATH=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -1)
+          elif [ "${{ matrix.platform.bundle-type }}" = "deb" ]; then
+            BUNDLE_PATH=$(find src-tauri/target/release/bundle/deb -name "*.deb" | head -1)
+          elif [ "${{ matrix.platform.bundle-type }}" = "msi" ]; then
+            BUNDLE_PATH=$(find src-tauri/target/release/bundle/msi -name "*.msi" | head -1)
+          elif [ "${{ matrix.platform.bundle-type }}" = "nsis" ]; then
+            BUNDLE_PATH=$(find src-tauri/target/release/bundle/nsis -name "*.exe" | head -1)
+          elif [ "${{ matrix.platform.bundle-type }}" = "dmg" ]; then
+            if [ "${{ matrix.platform.rust-target }}" = "aarch64-apple-darwin" ]; then
+              BUNDLE_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+            else
+              BUNDLE_PATH=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
+            fi
+          fi
+
+          if [ -z "$BUNDLE_PATH" ] || [ ! -f "$BUNDLE_PATH" ]; then
+            echo "❌ 未找到构建产物!"
+            echo "查找路径:"
+            find src-tauri/target -type d -name "bundle" 2>/dev/null || true
+            find src-tauri/target -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.msi" -o -name "*.exe" -o -name "*.dmg" \) 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "✅ 找到构建产物: $BUNDLE_PATH"
+          echo "bundle_path=$BUNDLE_PATH" >> $GITHUB_OUTPUT
+          echo "bundle_name=$(basename "$BUNDLE_PATH")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      # 重命名构建产物
+      - name: Rename build artifacts
+        run: |
+          ORIGINAL_NAME="${{ steps.find-artifacts.outputs.bundle_name }}"
+          EXTENSION="${ORIGINAL_NAME##*.}"
+
+          # 根据平台和架构生成文件名，不包含文件类型后缀
+          if [ "${{ matrix.platform.bundle-type }}" = "appimage" ]; then
+            NEW_NAME="claudia-linux-x86_64.${EXTENSION}"
+          elif [ "${{ matrix.platform.bundle-type }}" = "deb" ]; then
+            NEW_NAME="claudia-linux-x86_64.${EXTENSION}"
+          elif [ "${{ matrix.platform.bundle-type }}" = "msi" ]; then
+            NEW_NAME="claudia-windows-x86_64.${EXTENSION}"
+          elif [ "${{ matrix.platform.bundle-type }}" = "nsis" ]; then
+            NEW_NAME="claudia-windows-x86_64.${EXTENSION}"
+          elif [ "${{ matrix.platform.bundle-type }}" = "dmg" ]; then
+            if [ "${{ matrix.platform.rust-target }}" = "aarch64-apple-darwin" ]; then
+              NEW_NAME="claudia-macos-aarch64.${EXTENSION}"
+            else
+              NEW_NAME="claudia-macos-x86_64.${EXTENSION}"
+            fi
+          fi
+
+          cp "${{ steps.find-artifacts.outputs.bundle_path }}" "$NEW_NAME"
+          echo "ARTIFACT_PATH=$NEW_NAME" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=$NEW_NAME" >> $GITHUB_ENV
+          echo "✅ 重命名文件: $ORIGINAL_NAME -> $NEW_NAME"
+        shell: bash
+
+      # 上传构建产物
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact-name }}
+          path: ${{ env.ARTIFACT_PATH }}
+          retention-days: 7
+
+  # 创建Release
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-release]
+    if: always() && needs.build-release.result == 'success'
+
+    steps:
+      # 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 下载所有构建产物
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      # 准备发布文件
+      - name: Prepare release files
+        run: |
+          mkdir -p ./release-files
+          echo "📦 查找所有构建产物..."
+          find ./artifacts -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.msi" -o -name "*.exe" -o -name "*.dmg" \) -print
+          echo "📦 复制构建产物到发布目录..."
+          find ./artifacts -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.msi" -o -name "*.exe" -o -name "*.dmg" \) -exec cp {} ./release-files/ \;
+          echo "📦 发布文件列表:"
+          ls -la ./release-files/
+
+          # 检查是否有文件被复制
+          if [ -z "$(ls -A ./release-files/)" ]; then
+            echo "❌ 没有找到任何构建产物!"
+            echo "artifacts 目录内容:"
+            find ./artifacts -type f -ls
+            exit 1
+          fi
+
+      # 获取版本标签
+      - name: Get version tag
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      # 生成更新日志
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          echo "## 🚀 Claudia ${VERSION}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          # 中文版本
+          echo "### 📦 安装包下载 / Download Packages" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          for file in ./release-files/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              if [[ "$filename" == *"linux"* && "$filename" == *".AppImage" ]]; then
+                echo "- **Linux AppImage (x86_64)**: \`$filename\`" >> CHANGELOG.md
+              elif [[ "$filename" == *"linux"* && "$filename" == *".deb" ]]; then
+                echo "- **Linux DEB (x86_64)**: \`$filename\`" >> CHANGELOG.md
+              elif [[ "$filename" == *"windows"* && "$filename" == *".msi" ]]; then
+                echo "- **Windows MSI (x86_64)**: \`$filename\`" >> CHANGELOG.md
+              elif [[ "$filename" == *"windows"* && "$filename" == *".exe" ]]; then
+                echo "- **Windows EXE (x86_64)**: \`$filename\`" >> CHANGELOG.md
+              elif [[ "$filename" == *"macos-x86_64"* && "$filename" == *".dmg" ]]; then
+                echo "- **macOS (Intel)**: \`$filename\`" >> CHANGELOG.md
+              elif [[ "$filename" == *"macos-aarch64"* && "$filename" == *".dmg" ]]; then
+                echo "- **macOS (Apple Silicon)**: \`$filename\`" >> CHANGELOG.md
+              fi
+            fi
+          done
+
+          echo "" >> CHANGELOG.md
+          echo "### 📋 系统要求 / System Requirements" >> CHANGELOG.md
+          echo "- **Linux**: Ubuntu 18.04+ 或其他现代Linux发行版 / Ubuntu 18.04+ or other modern Linux distributions" >> CHANGELOG.md
+          echo "- **Windows**: Windows 10+ (64位) / Windows 10+ (64-bit)" >> CHANGELOG.md
+          echo "- **macOS**: macOS 10.15+ (Catalina)" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### 🔧 安装说明 / Installation Instructions" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "#### Linux" >> CHANGELOG.md
+          echo "**AppImage**:" >> CHANGELOG.md
+          echo "- 中文：下载 \`.AppImage\` 文件，添加执行权限后直接运行" >> CHANGELOG.md
+          echo "- English: Download the \`.AppImage\` file, add execute permission and run directly" >> CHANGELOG.md
+          echo "\`\`\`bash" >> CHANGELOG.md
+          echo "chmod +x claudia-linux-x86_64.AppImage" >> CHANGELOG.md
+          echo "./claudia-linux-x86_64.AppImage" >> CHANGELOG.md
+          echo "\`\`\`" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "**DEB Package**:" >> CHANGELOG.md
+          echo "- 中文：下载 \`.deb\` 文件，使用包管理器安装" >> CHANGELOG.md
+          echo "- English: Download the \`.deb\` file and install using package manager" >> CHANGELOG.md
+          echo "\`\`\`bash" >> CHANGELOG.md
+          echo "# Ubuntu/Debian" >> CHANGELOG.md
+          echo "sudo dpkg -i claudia-linux-x86_64.deb" >> CHANGELOG.md
+          echo "sudo apt-get install -f  # 解决依赖问题 / Fix dependencies if needed" >> CHANGELOG.md
+          echo "\`\`\`" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "#### Windows" >> CHANGELOG.md
+          echo "**MSI Installer**:" >> CHANGELOG.md
+          echo "- 中文：下载 \`.msi\` 文件，双击安装（推荐）" >> CHANGELOG.md
+          echo "- English: Download the \`.msi\` file and double-click to install (Recommended)" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "**EXE Installer**:" >> CHANGELOG.md
+          echo "- 中文：下载 \`.exe\` 文件，右键以管理员身份运行安装" >> CHANGELOG.md
+          echo "- English: Download the \`.exe\` file, right-click and run as administrator to install" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "#### macOS" >> CHANGELOG.md
+          echo "**DMG Package**:" >> CHANGELOG.md
+          echo "- 中文：下载 \`.dmg\` 文件，打开后拖拽到应用程序文件夹" >> CHANGELOG.md
+          echo "- English: Download the \`.dmg\` file, open it and drag to Applications folder" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### ⚠️ 安全提示 / Security Notes" >> CHANGELOG.md
+          echo "- 中文：首次运行时，系统可能会提示安全警告，请在系统设置中允许运行" >> CHANGELOG.md
+          echo "- English: On first run, the system may show security warnings. Please allow the app to run in system settings" >> CHANGELOG.md
+          echo "- **macOS**: 系统偏好设置 → 安全性与隐私 → 通用 / System Preferences → Security & Privacy → General" >> CHANGELOG.md
+          echo "- **Windows**: Windows安全中心 → 应用和浏览器控制 / Windows Security → App & browser control" >> CHANGELOG.md
+
+      # 创建GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get-version.outputs.version }}
+          name: Claudia ${{ steps.get-version.outputs.version }}
+          body_path: CHANGELOG.md
+          files: ./release-files/*
+          draft: false
+          prerelease: ${{ contains(steps.get-version.outputs.version, 'alpha') || contains(steps.get-version.outputs.version, 'beta') || contains(steps.get-version.outputs.version, 'rc') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 发布成功通知
+      - name: Release summary
+        run: |
+          echo "🎉 Release ${{ steps.get-version.outputs.version }} created successfully!"
+          echo "📦 包含以下安装包:"
+          ls -la ./release-files/
+          echo ""
+          echo "🔗 Release链接: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.get-version.outputs.version }}"

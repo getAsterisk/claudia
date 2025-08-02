@@ -32,9 +32,9 @@
   --color-border: oklch(0.16 0.01 240);
   --color-input: oklch(0.16 0.01 240);
   --color-ring: oklch(0.52 0.015 240);
-  
+
   /* Additional colors for status messages */
-  --color-green-500: oklch(0.72 0.20 142);
+  --color-green-500: oklch(0.72 0.2 142);
   --color-green-600: oklch(0.64 0.22 142);
 
   /* Border radius */
@@ -45,8 +45,22 @@
   --radius-xl: 1rem;
 
   /* Fonts */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell",
+    "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+
+  /* Font scaling */
+  --font-scale-multiplier: 1;
+  --font-size-xs: calc(0.75rem * var(--font-scale-multiplier));
+  --font-size-sm: calc(0.875rem * var(--font-scale-multiplier));
+  --font-size-base: calc(1rem * var(--font-scale-multiplier));
+  --font-size-lg: calc(1.125rem * var(--font-scale-multiplier));
+  --font-size-xl: calc(1.25rem * var(--font-scale-multiplier));
+  --font-size-2xl: calc(1.5rem * var(--font-scale-multiplier));
+  --font-size-3xl: calc(1.875rem * var(--font-scale-multiplier));
+  --font-size-4xl: calc(2.25rem * var(--font-scale-multiplier));
 
   /* Transitions */
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
@@ -155,6 +169,77 @@ body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+}
+
+/* Font scaling utilities */
+.text-xs { font-size: var(--font-size-xs); }
+.text-sm { font-size: var(--font-size-sm); }
+.text-base { font-size: var(--font-size-base); }
+.text-lg { font-size: var(--font-size-lg); }
+.text-xl { font-size: var(--font-size-xl); }
+.text-2xl { font-size: var(--font-size-2xl); }
+.text-3xl { font-size: var(--font-size-3xl); }
+.text-4xl { font-size: var(--font-size-4xl); }
+
+/* Ensure font scaling applies to all text elements */
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+}
+
+/* Scale specific elements */
+h1 { font-size: var(--font-size-2xl); font-weight: 700; }
+h2 { font-size: var(--font-size-xl); font-weight: 600; }
+h3 { font-size: var(--font-size-lg); font-weight: 600; }
+h4 { font-size: var(--font-size-base); font-weight: 600; }
+h5 { font-size: var(--font-size-sm); font-weight: 600; }
+h6 { font-size: var(--font-size-xs); font-weight: 600; }
+
+/* Apply font scaling to AI output and code blocks */
+.prose, .prose * {
+  font-size: inherit !important;
+}
+
+/* Code blocks and syntax highlighting */
+pre, code, .hljs {
+  font-size: calc(var(--font-size-sm) * 0.9) !important;
+  font-family: var(--font-mono) !important;
+}
+
+/* Markdown content scaling */
+.markdown-content p {
+  font-size: var(--font-size-base);
+}
+
+.markdown-content h1 { font-size: var(--font-size-2xl); }
+.markdown-content h2 { font-size: var(--font-size-xl); }
+.markdown-content h3 { font-size: var(--font-size-lg); }
+.markdown-content h4 { font-size: var(--font-size-base); }
+.markdown-content h5 { font-size: var(--font-size-sm); }
+.markdown-content h6 { font-size: var(--font-size-xs); }
+
+.markdown-content ul, .markdown-content ol {
+  font-size: var(--font-size-base);
+}
+
+.markdown-content blockquote {
+  font-size: var(--font-size-base);
+}
+
+/* Tool widgets and AI output */
+.tool-widget, .ai-output {
+  font-size: var(--font-size-base);
+}
+
+/* Stream messages */
+.stream-message {
+  font-size: var(--font-size-base);
+}
+
+/* Terminal and command output */
+.terminal-output, .command-output {
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
 }
 
 /* Placeholder text styling */
@@ -249,14 +334,18 @@ button:focus-visible,
 @keyframes enter {
   from {
     opacity: var(--tw-enter-opacity, 1);
-    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0) scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1)) rotate(var(--tw-enter-rotate, 0));
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1))
+      rotate(var(--tw-enter-rotate, 0));
   }
 }
 
 @keyframes exit {
   to {
     opacity: var(--tw-exit-opacity, 1);
-    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0) scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1)) rotate(var(--tw-exit-rotate, 0));
+    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
+      scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1))
+      rotate(var(--tw-exit-rotate, 0));
   }
 }
 
@@ -366,7 +455,12 @@ button:focus-visible,
   margin-bottom: 1.2em;
 }
 
-.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
   margin-top: 0;
   margin-bottom: 0.8888889em;
   font-weight: 600;
@@ -399,7 +493,8 @@ button:focus-visible,
   font-weight: 600;
 }
 
-.prose ol, .prose ul {
+.prose ol,
+.prose ul {
   margin-top: 1.25em;
   margin-bottom: 1.25em;
   padding-left: 1.625em;
@@ -540,11 +635,26 @@ button:focus-visible,
 
 /* Rotating symbol animation */
 @keyframes rotate-symbol {
-  0%   { content: "◐"; transform: scale(1); }
-  25%  { content: "◓"; transform: scale(1); }
-  50%  { content: "◑"; transform: scale(1); }
-  75%  { content: "◒"; transform: scale(1); }
-  100% { content: "◐"; transform: scale(1); }
+  0% {
+    content: "◐";
+    transform: scale(1);
+  }
+  25% {
+    content: "◓";
+    transform: scale(1);
+  }
+  50% {
+    content: "◑";
+    transform: scale(1);
+  }
+  75% {
+    content: "◒";
+    transform: scale(1);
+  }
+  100% {
+    content: "◐";
+    transform: scale(1);
+  }
 }
 
 @keyframes fade-in {
@@ -603,12 +713,7 @@ button:focus-visible,
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.05),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
   transition: left 0.5s;
 }
 
@@ -653,8 +758,8 @@ button:focus-visible,
     #d97757 95%,
     transparent 100%
   );
-  -webkit-mask: 
-    linear-gradient(#fff 0 0) content-box, 
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -776,4 +881,4 @@ code::-webkit-scrollbar-thumb:hover {
 
 .image-move-to-input {
   animation: moveToInput 0.8s ease-in-out forwards;
-} 
+}

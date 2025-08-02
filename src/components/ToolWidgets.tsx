@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { 
-  CheckCircle2, 
-  Circle, 
+import {
+  CheckCircle2,
+  Circle,
   Clock,
   FolderOpen,
   FileText,
@@ -55,7 +55,7 @@ import { getClaudeSyntaxTheme } from "@/lib/claudeSyntaxTheme";
 import { useTheme } from "@/hooks";
 import { Button } from "@/components/ui/button";
 import { createPortal } from "react-dom";
-import * as Diff from 'diff';
+import * as Diff from "diff";
 import { Card, CardContent } from "@/components/ui/card";
 import { detectLinks, makeLinksClickable } from "@/lib/linkDetector";
 import ReactMarkdown from "react-markdown";
@@ -63,21 +63,107 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
+import { logger } from "@/lib/logger";
+
+// Type definitions for tool results
+interface ToolResult {
+  content?: string | { text?: string } | unknown[];
+  is_error?: boolean;
+  todos?: TodoItem[];
+}
+
+// Extended tool result interface for better type safety
+interface ExtendedToolResult {
+  content?: string | { text?: string } | unknown[];
+  is_error?: boolean;
+  todos?: TodoItem[];
+  [key: string]: unknown;
+}
+
+interface ContentObject {
+  text?: string;
+}
+
+// Todo item interface
+export interface TodoItem {
+  id?: string;
+  status?: string;
+  content?: string;
+  priority?: string;
+  dependencies?: string[];
+}
+
+/**
+ * Helper function to safely extract content from tool results
+ *
+ * Safely extracts text content from various tool result formats while
+ * handling different data structures and error states.
+ *
+ * @param result - Raw tool result from Claude Code execution
+ * @returns Object containing extracted content and error status
+ */
+const extractResultContent = (result: unknown): { content: string; isError: boolean } => {
+  if (!result) {
+    return { content: "", isError: false };
+  }
+
+  const resultObj = result as ExtendedToolResult;
+  const isError = resultObj.is_error || false;
+  let content = "";
+
+  if (typeof resultObj.content === "string") {
+    content = resultObj.content;
+  } else if (resultObj.content && typeof resultObj.content === "object") {
+    const contentObj = resultObj.content as { text?: string } | unknown[];
+    if ("text" in contentObj && typeof contentObj.text === "string") {
+      content = contentObj.text;
+    } else if (Array.isArray(contentObj)) {
+      content = contentObj
+        .map((c: unknown) =>
+          typeof c === "string" ? c : (c as { text?: string }).text || JSON.stringify(c)
+        )
+        .join("\n");
+    } else {
+      content = JSON.stringify(resultObj.content, null, 2);
+    }
+  }
+
+  return { content, isError };
+};
 
 /**
  * Widget for TodoWrite tool - displays a beautiful TODO list
+ *
+ * Renders a visually appealing todo list with status indicators, priority badges,
+ * and completion states. Supports different todo statuses and priority levels.
+ *
+ * @param todos - Array of todo items to display
+ * @param result - Optional tool result (currently unused)
+ *
+ * @example
+ * ```tsx
+ * <TodoWidget
+ *   todos={[
+ *     { id: '1', content: 'Complete feature', status: 'in_progress', priority: 'high' },
+ *     { id: '2', content: 'Write tests', status: 'pending', priority: 'medium' }
+ *   ]}
+ * />
+ * ```
  */
-export const TodoWidget: React.FC<{ todos: any[]; result?: any }> = ({ todos, result: _result }) => {
+export const TodoWidget: React.FC<{ todos: TodoItem[]; result?: unknown }> = ({
+  todos,
+  result: _result,
+}) => {
   const statusIcons = {
     completed: <CheckCircle2 className="h-4 w-4 text-green-500" />,
     in_progress: <Clock className="h-4 w-4 text-blue-500 animate-pulse" />,
-    pending: <Circle className="h-4 w-4 text-muted-foreground" />
+    pending: <Circle className="h-4 w-4 text-muted-foreground" />,
   };
 
   const priorityColors = {
     high: "bg-red-500/10 text-red-500 border-red-500/20",
     medium: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
-    low: "bg-green-500/10 text-green-500 border-green-500/20"
+    low: "bg-green-500/10 text-green-500 border-green-500/20",
   };
 
   return (
@@ -99,16 +185,16 @@ export const TodoWidget: React.FC<{ todos: any[]; result?: any }> = ({ todos, re
               {statusIcons[todo.status as keyof typeof statusIcons] || statusIcons.pending}
             </div>
             <div className="flex-1 space-y-1">
-              <p className={cn(
-                "text-sm",
-                todo.status === "completed" && "line-through"
-              )}>
+              <p className={cn("text-sm", todo.status === "completed" && "line-through")}>
                 {todo.content}
               </p>
               {todo.priority && (
-                <Badge 
-                  variant="outline" 
-                  className={cn("text-xs", priorityColors[todo.priority as keyof typeof priorityColors])}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs",
+                    priorityColors[todo.priority as keyof typeof priorityColors]
+                  )}
                 >
                   {todo.priority}
                 </Badge>
@@ -123,46 +209,60 @@ export const TodoWidget: React.FC<{ todos: any[]; result?: any }> = ({ todos, re
 
 /**
  * Widget for LS (List Directory) tool
+ *
+ * Displays directory listing information with loading states and result content.
+ * Shows the path being listed and renders results using LSResultWidget when available.
+ *
+ * @param path - Directory path being listed
+ * @param result - Tool execution result containing directory contents
+ *
+ * @example
+ * ```tsx
+ * <LSWidget
+ *   path="/home/user/project"
+ *   result={directoryListingResult}
+ * />
+ * ```
  */
-export const LSWidget: React.FC<{ path: string; result?: any }> = ({ path, result }) => {
+export const LSWidget: React.FC<{ path: string; result?: unknown }> = ({ path, result }) => {
   // If we have a result, show it using the LSResultWidget
   if (result) {
-    let resultContent = '';
-    if (typeof result.content === 'string') {
-      resultContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        resultContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        resultContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
+    let resultContent = "";
+    const resultObj = result as ToolResult;
+    if (typeof resultObj.content === "string") {
+      resultContent = resultObj.content;
+    } else if (resultObj.content && typeof resultObj.content === "object") {
+      const contentObj = resultObj.content as { text?: string } | unknown[];
+      if ("text" in contentObj && typeof contentObj.text === "string") {
+        resultContent = contentObj.text;
+      } else if (Array.isArray(resultObj.content)) {
+        resultContent = resultObj.content
+          .map((c: unknown) =>
+            typeof c === "string" ? c : (c as { text?: string }).text || JSON.stringify(c)
+          )
+          .join("\n");
       } else {
-        resultContent = JSON.stringify(result.content, null, 2);
+        resultContent = JSON.stringify(resultObj.content, null, 2);
       }
     }
-    
+
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
           <FolderOpen className="h-4 w-4 text-primary" />
           <span className="text-sm">Directory contents for:</span>
-          <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
-            {path}
-          </code>
+          <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">{path}</code>
         </div>
         {resultContent && <LSResultWidget content={resultContent} />}
       </div>
     );
   }
-  
+
   return (
     <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
       <FolderOpen className="h-4 w-4 text-primary" />
       <span className="text-sm">Listing directory:</span>
-      <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
-        {path}
-      </code>
+      <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">{path}</code>
       {!result && (
         <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
           <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse" />
@@ -175,62 +275,88 @@ export const LSWidget: React.FC<{ path: string; result?: any }> = ({ path, resul
 
 /**
  * Widget for LS tool result - displays directory tree structure
+ *
+ * Parses and renders directory listing output as an interactive tree structure
+ * with expandable directories, file type icons, and proper indentation.
+ *
+ * @param content - Raw directory listing content from ls command
+ *
+ * @example
+ * ```tsx
+ * <LSResultWidget content={`
+ *   - src/
+ *     - components/
+ *       - Button.tsx
+ *     - utils/
+ *   - package.json
+ * `} />
+ * ```
  */
 export const LSResultWidget: React.FC<{ content: string }> = ({ content }) => {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
-  
-  // Parse the directory tree structure
+
+  /**
+   * Parse raw directory listing content into structured tree data
+   *
+   * @param rawContent - Raw text content from directory listing command
+   * @returns Array of directory entry objects with path, name, level, and type
+   */
   const parseDirectoryTree = (rawContent: string) => {
-    const lines = rawContent.split('\n');
+    const lines = rawContent.split("\n");
     const entries: Array<{
       path: string;
       name: string;
-      type: 'file' | 'directory';
+      type: "file" | "directory";
       level: number;
     }> = [];
-    
+
     let currentPath: string[] = [];
-    
+
     for (const line of lines) {
       // Skip NOTE section and everything after it
-      if (line.startsWith('NOTE:')) {
+      if (line.startsWith("NOTE:")) {
         break;
       }
-      
+
       // Skip empty lines
       if (!line.trim()) continue;
-      
+
       // Calculate indentation level
-      const indent = line.match(/^(\s*)/)?.[1] || '';
+      const indent = line.match(/^(\s*)/)?.[1] || "";
       const level = Math.floor(indent.length / 2);
-      
+
       // Extract the entry name
       const entryMatch = line.match(/^\s*-\s+(.+?)(\/$)?$/);
       if (!entryMatch) continue;
-      
+
       const fullName = entryMatch[1];
-      const isDirectory = line.trim().endsWith('/');
+      const isDirectory = line.trim().endsWith("/");
       const name = isDirectory ? fullName : fullName;
-      
+
       // Update current path based on level
       currentPath = currentPath.slice(0, level);
       currentPath.push(name);
-      
+
       entries.push({
-        path: currentPath.join('/'),
+        path: currentPath.join("/"),
         name,
-        type: isDirectory ? 'directory' : 'file',
+        type: isDirectory ? "directory" : "file",
         level,
       });
     }
-    
+
     return entries;
   };
-  
+
   const entries = parseDirectoryTree(content);
-  
+
+  /**
+   * Toggle the expanded state of a directory
+   *
+   * @param path - Path of the directory to toggle
+   */
   const toggleDirectory = (path: string) => {
-    setExpandedDirs(prev => {
+    setExpandedDirs((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
@@ -240,106 +366,126 @@ export const LSResultWidget: React.FC<{ content: string }> = ({ content }) => {
       return next;
     });
   };
-  
+
   // Group entries by parent for collapsible display
+  /**
+   * Get child entries for a given parent directory
+   *
+   * @param parentPath - Path of the parent directory
+   * @param parentLevel - Nesting level of the parent directory
+   * @returns Array of child directory entries
+   */
   const getChildren = (parentPath: string, parentLevel: number) => {
-    return entries.filter(e => {
+    return entries.filter((e) => {
       if (e.level !== parentLevel + 1) return false;
-      const parentParts = parentPath.split('/').filter(Boolean);
-      const entryParts = e.path.split('/').filter(Boolean);
-      
+      const parentParts = parentPath.split("/").filter(Boolean);
+      const entryParts = e.path.split("/").filter(Boolean);
+
       // Check if this entry is a direct child of the parent
       if (entryParts.length !== parentParts.length + 1) return false;
-      
+
       // Check if all parent parts match
       for (let i = 0; i < parentParts.length; i++) {
         if (parentParts[i] !== entryParts[i]) return false;
       }
-      
+
       return true;
     });
   };
-  
-  const renderEntry = (entry: typeof entries[0], isRoot = false) => {
-    const hasChildren = entry.type === 'directory' && 
-      entries.some(e => e.path.startsWith(entry.path + '/') && e.level === entry.level + 1);
+
+  /**
+   * Render a single directory entry with appropriate icon and styling
+   *
+   * @param entry - Directory entry object to render
+   * @param isRoot - Whether this is a root-level entry
+   * @returns JSX element for the directory entry
+   */
+  const renderEntry = (entry: (typeof entries)[0], isRoot = false) => {
+    const hasChildren =
+      entry.type === "directory" &&
+      entries.some((e) => e.path.startsWith(`${entry.path}/`) && e.level === entry.level + 1);
     const isExpanded = expandedDirs.has(entry.path) || isRoot;
-    
+
+    /**
+     * Get appropriate icon for file or directory entry
+     *
+     * @returns Lucide icon component based on entry type and file extension
+     */
     const getIcon = () => {
-      if (entry.type === 'directory') {
-        return isExpanded ? 
-          <FolderOpen className="h-3.5 w-3.5 text-blue-500" /> : 
-          <Folder className="h-3.5 w-3.5 text-blue-500" />;
+      if (entry.type === "directory") {
+        return isExpanded ? (
+          <FolderOpen className="h-3.5 w-3.5 text-blue-500" />
+        ) : (
+          <Folder className="h-3.5 w-3.5 text-blue-500" />
+        );
       }
-      
+
       // File type icons based on extension
-      const ext = entry.name.split('.').pop()?.toLowerCase();
+      const ext = entry.name.split(".").pop()?.toLowerCase();
       switch (ext) {
-        case 'rs':
+        case "rs":
           return <FileCode className="h-3.5 w-3.5 text-orange-500" />;
-        case 'toml':
-        case 'yaml':
-        case 'yml':
-        case 'json':
+        case "toml":
+        case "yaml":
+        case "yml":
+        case "json":
           return <FileText className="h-3.5 w-3.5 text-yellow-500" />;
-        case 'md':
+        case "md":
           return <FileText className="h-3.5 w-3.5 text-blue-400" />;
-        case 'js':
-        case 'jsx':
-        case 'ts':
-        case 'tsx':
+        case "js":
+        case "jsx":
+        case "ts":
+        case "tsx":
           return <FileCode className="h-3.5 w-3.5 text-yellow-400" />;
-        case 'py':
+        case "py":
           return <FileCode className="h-3.5 w-3.5 text-blue-500" />;
-        case 'go':
+        case "go":
           return <FileCode className="h-3.5 w-3.5 text-cyan-500" />;
-        case 'sh':
-        case 'bash':
+        case "sh":
+        case "bash":
           return <Terminal className="h-3.5 w-3.5 text-green-500" />;
         default:
           return <FileText className="h-3.5 w-3.5 text-muted-foreground" />;
       }
     };
-    
+
     return (
       <div key={entry.path}>
-        <div 
+        <div
           className={cn(
             "flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 transition-colors cursor-pointer",
             !isRoot && "ml-4"
           )}
-          onClick={() => entry.type === 'directory' && hasChildren && toggleDirectory(entry.path)}
+          onClick={() => entry.type === "directory" && hasChildren && toggleDirectory(entry.path)}
         >
-          {entry.type === 'directory' && hasChildren && (
-            <ChevronRight className={cn(
-              "h-3 w-3 text-muted-foreground transition-transform",
-              isExpanded && "rotate-90"
-            )} />
+          {entry.type === "directory" && hasChildren && (
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 text-muted-foreground transition-transform",
+                isExpanded && "rotate-90"
+              )}
+            />
           )}
-          {(!hasChildren || entry.type !== 'directory') && (
-            <div className="w-3" />
-          )}
+          {(!hasChildren || entry.type !== "directory") && <div className="w-3" />}
           {getIcon()}
           <span className="text-sm font-mono">{entry.name}</span>
         </div>
-        
-        {entry.type === 'directory' && hasChildren && isExpanded && (
+
+        {entry.type === "directory" && hasChildren && isExpanded && (
           <div className="ml-2">
-            {getChildren(entry.path, entry.level).map(child => renderEntry(child))}
+            {getChildren(entry.path, entry.level).map((child) => renderEntry(child))}
           </div>
         )}
       </div>
     );
   };
-  
+
   // Get root entries
-  const rootEntries = entries.filter(e => e.level === 0);
-  
+  const rootEntries = entries.filter((e) => e.level === 0);
+
   return (
     <div className="rounded-lg border bg-muted/20 p-3">
-      <div className="space-y-1">
-        {rootEntries.map(entry => renderEntry(entry, true))}
-      </div>
+      <div className="space-y-1">{rootEntries.map((entry) => renderEntry(entry, true))}</div>
     </div>
   );
 };
@@ -347,24 +493,30 @@ export const LSResultWidget: React.FC<{ content: string }> = ({ content }) => {
 /**
  * Widget for Read tool
  */
-export const ReadWidget: React.FC<{ filePath: string; result?: any }> = ({ filePath, result }) => {
+export const ReadWidget: React.FC<{ filePath: string; result?: unknown }> = ({
+  filePath,
+  result,
+}) => {
   // If we have a result, show it using the ReadResultWidget
   if (result) {
-    let resultContent = '';
-    if (typeof result.content === 'string') {
-      resultContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        resultContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        resultContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
+    let resultContent = "";
+    const resultObj = result as ToolResult;
+    if (typeof resultObj.content === "string") {
+      resultContent = resultObj.content;
+    } else if (resultObj.content && typeof resultObj.content === "object") {
+      if ((resultObj.content as ContentObject).text) {
+        resultContent = (resultObj.content as ContentObject).text || "";
+      } else if (Array.isArray(resultObj.content)) {
+        resultContent = resultObj.content
+          .map((c: unknown) =>
+            typeof c === "string" ? c : (c as { text?: string }).text || JSON.stringify(c)
+          )
+          .join("\n");
       } else {
-        resultContent = JSON.stringify(result.content, null, 2);
+        resultContent = JSON.stringify(resultObj.content, null, 2);
       }
     }
-    
+
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
@@ -378,7 +530,7 @@ export const ReadWidget: React.FC<{ filePath: string; result?: any }> = ({ fileP
       </div>
     );
   }
-  
+
   return (
     <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
       <FileText className="h-4 w-4 text-primary" />
@@ -399,15 +551,18 @@ export const ReadWidget: React.FC<{ filePath: string; result?: any }> = ({ fileP
 /**
  * Widget for Read tool result - shows file content with line numbers
  */
-export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> = ({ content, filePath }) => {
+export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> = ({
+  content,
+  filePath,
+}) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const { theme } = useTheme();
   const syntaxTheme = getClaudeSyntaxTheme(theme);
-  
+
   // Extract file extension for syntax highlighting
   const getLanguage = (path?: string) => {
     if (!path) return "text";
-    const ext = path.split('.').pop()?.toLowerCase();
+    const ext = path.split(".").pop()?.toLowerCase();
     const languageMap: Record<string, string> = {
       ts: "typescript",
       tsx: "tsx",
@@ -442,35 +597,35 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
       toml: "ini",
       ini: "ini",
       dockerfile: "dockerfile",
-      makefile: "makefile"
+      makefile: "makefile",
     };
     return languageMap[ext || ""] || "text";
   };
 
   // Parse content to separate line numbers from code
   const parseContent = (rawContent: string) => {
-    const lines = rawContent.split('\n');
+    const lines = rawContent.split("\n");
     const codeLines: string[] = [];
     let minLineNumber = Infinity;
 
     // First, determine if the content is likely a numbered list from the 'read' tool.
     // It is if more than half the non-empty lines match the expected format.
-    const nonEmptyLines = lines.filter(line => line.trim() !== '');
+    const nonEmptyLines = lines.filter((line) => line.trim() !== "");
     if (nonEmptyLines.length === 0) {
       return { codeContent: rawContent, startLineNumber: 1 };
     }
-    const parsableLines = nonEmptyLines.filter(line => /^\s*\d+→/.test(line)).length;
-    const isLikelyNumbered = (parsableLines / nonEmptyLines.length) > 0.5;
+    const parsableLines = nonEmptyLines.filter((line) => /^\s*\d+�?/.test(line)).length;
+    const isLikelyNumbered = parsableLines / nonEmptyLines.length > 0.5;
 
     if (!isLikelyNumbered) {
       return { codeContent: rawContent, startLineNumber: 1 };
     }
-    
+
     // If it's a numbered list, parse it strictly.
     for (const line of lines) {
       // Remove leading whitespace before parsing
       const trimmedLine = line.trimStart();
-      const match = trimmedLine.match(/^(\d+)→(.*)$/);
+      const match = trimmedLine.match(/^(\d+).*$/);
       if (match) {
         const lineNum = parseInt(match[1], 10);
         if (minLineNumber === Infinity) {
@@ -478,30 +633,30 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
         }
         // Preserve the code content exactly as it appears after the arrow
         codeLines.push(match[2]);
-      } else if (line.trim() === '') {
+      } else if (line.trim() === "") {
         // Preserve empty lines
-        codeLines.push('');
+        codeLines.push("");
       } else {
         // If a line in a numbered block does not match, it's a formatting anomaly.
         // Render it as a blank line to avoid showing the raw, un-parsed string.
-        codeLines.push('');
+        codeLines.push("");
       }
     }
-    
+
     // Remove trailing empty lines
-    while (codeLines.length > 0 && codeLines[codeLines.length - 1] === '') {
+    while (codeLines.length > 0 && codeLines[codeLines.length - 1] === "") {
       codeLines.pop();
     }
-    
+
     return {
-      codeContent: codeLines.join('\n'),
-      startLineNumber: minLineNumber === Infinity ? 1 : minLineNumber
+      codeContent: codeLines.join("\n"),
+      startLineNumber: minLineNumber === Infinity ? 1 : minLineNumber,
     };
   };
 
   const language = getLanguage(filePath);
   const { codeContent, startLineNumber } = parseContent(content);
-  const lineCount = content.split('\n').filter(line => line.trim()).length;
+  const lineCount = content.split("\n").filter((line) => line.trim()).length;
   const isLargeFile = lineCount > 20;
 
   return (
@@ -513,9 +668,7 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
             {filePath || "File content"}
           </span>
           {isLargeFile && (
-            <span className="text-xs text-muted-foreground">
-              ({lineCount} lines)
-            </span>
+            <span className="text-xs text-muted-foreground">({lineCount} lines)</span>
           )}
         </div>
         {isLargeFile && (
@@ -523,12 +676,14 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            <ChevronRight className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")} />
+            <ChevronRight
+              className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")}
+            />
             {isExpanded ? "Collapse" : "Expand"}
           </button>
         )}
       </div>
-      
+
       {(!isLargeFile || isExpanded) && (
         <div className="relative overflow-x-auto">
           <SyntaxHighlighter
@@ -539,13 +694,13 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
             wrapLongLines={false}
             customStyle={{
               margin: 0,
-              background: 'transparent',
-              lineHeight: '1.6'
+              background: "transparent",
+              lineHeight: "1.6",
             }}
             codeTagProps={{
               style: {
-                fontSize: '0.75rem'
-              }
+                fontSize: "0.75rem",
+              },
             }}
             lineNumberStyle={{
               minWidth: "3.5rem",
@@ -558,7 +713,7 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
           </SyntaxHighlighter>
         </div>
       )}
-      
+
       {isLargeFile && !isExpanded && (
         <div className="px-4 py-3 text-xs text-muted-foreground text-center bg-zinc-900/30">
           Click "Expand" to view the full file
@@ -571,36 +726,19 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
 /**
  * Widget for Glob tool
  */
-export const GlobWidget: React.FC<{ pattern: string; result?: any }> = ({ pattern, result }) => {
+export const GlobWidget: React.FC<{ pattern: string; result?: unknown }> = ({
+  pattern,
+  result,
+}): React.ReactElement => {
   // Extract result content if available
-  let resultContent = '';
-  let isError = false;
-  
-  if (result) {
-    isError = result.is_error || false;
-    if (typeof result.content === 'string') {
-      resultContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        resultContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        resultContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
-      } else {
-        resultContent = JSON.stringify(result.content, null, 2);
-      }
-    }
-  }
-  
+  const { content: resultContent, isError } = extractResultContent(result);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
         <Search className="h-4 w-4 text-primary" />
         <span className="text-sm">Searching for pattern:</span>
-        <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
-          {pattern}
-        </code>
+        <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">{pattern}</code>
         {!result && (
           <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse" />
@@ -608,18 +746,20 @@ export const GlobWidget: React.FC<{ pattern: string; result?: any }> = ({ patter
           </div>
         )}
       </div>
-      
+
       {/* Show result if available */}
-      {result && (
-        <div className={cn(
-          "p-3 rounded-md border text-xs font-mono whitespace-pre-wrap overflow-x-auto",
-          isError 
-            ? "border-red-500/20 bg-red-500/5 text-red-400" 
-            : "border-green-500/20 bg-green-500/5 text-green-300"
-        )}>
+      {result ? (
+        <div
+          className={cn(
+            "p-3 rounded-md border text-xs font-mono whitespace-pre-wrap overflow-x-auto",
+            isError
+              ? "border-red-500/20 bg-red-500/5 text-red-400"
+              : "border-green-500/20 bg-green-500/5 text-green-300"
+          )}
+        >
           {resultContent || (isError ? "Search failed" : "No matches found")}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
@@ -627,32 +767,14 @@ export const GlobWidget: React.FC<{ pattern: string; result?: any }> = ({ patter
 /**
  * Widget for Bash tool
  */
-export const BashWidget: React.FC<{ 
-  command: string; 
+export const BashWidget: React.FC<{
+  command: string;
   description?: string;
-  result?: any;
-}> = ({ command, description, result }) => {
+  result?: unknown;
+}> = ({ command, description, result }): React.ReactElement => {
   // Extract result content if available
-  let resultContent = '';
-  let isError = false;
-  
-  if (result) {
-    isError = result.is_error || false;
-    if (typeof result.content === 'string') {
-      resultContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        resultContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        resultContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
-      } else {
-        resultContent = JSON.stringify(result.content, null, 2);
-      }
-    }
-  }
-  
+  const { content: resultContent, isError } = extractResultContent(result);
+
   return (
     <div className="rounded-lg border bg-zinc-950 overflow-hidden">
       <div className="px-4 py-2 bg-zinc-900/50 flex items-center gap-2 border-b">
@@ -673,21 +795,21 @@ export const BashWidget: React.FC<{
         )}
       </div>
       <div className="p-4 space-y-3">
-        <code className="text-xs font-mono text-green-400 block">
-          $ {command}
-        </code>
-        
+        <code className="text-xs font-mono text-green-400 block">$ {command}</code>
+
         {/* Show result if available */}
-        {result && (
-          <div className={cn(
-            "mt-3 p-3 rounded-md border text-xs font-mono whitespace-pre-wrap overflow-x-auto",
-            isError 
-              ? "border-red-500/20 bg-red-500/5 text-red-400" 
-              : "border-green-500/20 bg-green-500/5 text-green-300"
-          )}>
+        {result ? (
+          <div
+            className={cn(
+              "mt-3 p-3 rounded-md border text-xs font-mono whitespace-pre-wrap overflow-x-auto",
+              isError
+                ? "border-red-500/20 bg-red-500/5 text-red-400"
+                : "border-green-500/20 bg-green-500/5 text-green-300"
+            )}
+          >
             {resultContent || (isError ? "Command failed" : "Command completed")}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -696,14 +818,18 @@ export const BashWidget: React.FC<{
 /**
  * Widget for Write tool
  */
-export const WriteWidget: React.FC<{ filePath: string; content: string; result?: any }> = ({ filePath, content, result: _result }) => {
+export const WriteWidget: React.FC<{ filePath: string; content: string; result?: unknown }> = ({
+  filePath,
+  content,
+  result: _result,
+}) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const { theme } = useTheme();
   const syntaxTheme = getClaudeSyntaxTheme(theme);
-  
+
   // Extract file extension for syntax highlighting
   const getLanguage = (path: string) => {
-    const ext = path.split('.').pop()?.toLowerCase();
+    const ext = path.split(".").pop()?.toLowerCase();
     const languageMap: Record<string, string> = {
       ts: "typescript",
       tsx: "tsx",
@@ -738,27 +864,27 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
       toml: "ini",
       ini: "ini",
       dockerfile: "dockerfile",
-      makefile: "makefile"
+      makefile: "makefile",
     };
     return languageMap[ext || ""] || "text";
   };
 
   const language = getLanguage(filePath);
   const isLargeContent = content.length > 1000;
-  const displayContent = isLargeContent ? content.substring(0, 1000) + "\n..." : content;
+  const displayContent = isLargeContent ? `${content.substring(0, 1000)}\n...` : content;
 
   // Maximized view as a modal
   const MaximizedView = () => {
     if (!isMaximized) return null;
-    
+
     return createPortal(
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         {/* Backdrop with blur */}
-        <div 
+        <div
           className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           onClick={() => setIsMaximized(false)}
         />
-        
+
         {/* Modal content */}
         <div className="relative w-[90vw] h-[90vh] max-w-7xl bg-zinc-950 rounded-lg border shadow-2xl overflow-hidden flex flex-col">
           {/* Header */}
@@ -767,16 +893,16 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
               <FileText className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-mono text-muted-foreground">{filePath}</span>
             </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="h-8 w-8"
               onClick={() => setIsMaximized(false)}
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
-          
+
           {/* Code content */}
           <div className="flex-1 overflow-auto">
             <SyntaxHighlighter
@@ -784,11 +910,11 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
               style={syntaxTheme}
               customStyle={{
                 margin: 0,
-                padding: '1.5rem',
-                background: 'transparent',
-                fontSize: '0.75rem',
-                lineHeight: '1.5',
-                height: '100%'
+                padding: "1.5rem",
+                background: "transparent",
+                fontSize: "0.75rem",
+                lineHeight: "1.5",
+                height: "100%",
               }}
               showLineNumbers
             >
@@ -802,13 +928,13 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
   };
 
   const CodePreview = ({ codeContent, truncated }: { codeContent: string; truncated: boolean }) => (
-    <div 
+    <div
       className="rounded-lg border bg-zinc-950 overflow-hidden w-full"
-      style={{ 
-        height: truncated ? '440px' : 'auto', 
-        maxHeight: truncated ? '440px' : undefined,
-        display: 'flex', 
-        flexDirection: 'column' 
+      style={{
+        height: truncated ? "440px" : "auto",
+        maxHeight: truncated ? "440px" : undefined,
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div className="px-4 py-2 border-b bg-zinc-950 flex items-center justify-between sticky top-0 z-10">
@@ -818,9 +944,9 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
             <Badge variant="outline" className="text-xs whitespace-nowrap">
               Truncated to 1000 chars
             </Badge>
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="h-6 w-6"
               onClick={() => setIsMaximized(true)}
             >
@@ -835,11 +961,11 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
           style={syntaxTheme}
           customStyle={{
             margin: 0,
-            padding: '1rem',
-            background: 'transparent',
-            fontSize: '0.75rem',
-            lineHeight: '1.5',
-            overflowX: 'auto'
+            padding: "1rem",
+            background: "transparent",
+            fontSize: "0.75rem",
+            lineHeight: "1.5",
+            overflowX: "auto",
           }}
           wrapLongLines={false}
         >
@@ -867,62 +993,50 @@ export const WriteWidget: React.FC<{ filePath: string; content: string; result?:
 /**
  * Widget for Grep tool
  */
-export const GrepWidget: React.FC<{ 
-  pattern: string; 
-  include?: string; 
+export const GrepWidget = ({
+  pattern,
+  include,
+  path,
+  exclude,
+  result,
+}: {
+  pattern: string;
+  include?: string;
   path?: string;
   exclude?: string;
-  result?: any;
-}> = ({ pattern, include, path, exclude, result }) => {
+  result?: unknown;
+}): React.JSX.Element => {
   const [isExpanded, setIsExpanded] = useState(true);
-  
+
   // Extract result content if available
-  let resultContent = '';
-  let isError = false;
-  
-  if (result) {
-    isError = result.is_error || false;
-    if (typeof result.content === 'string') {
-      resultContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        resultContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        resultContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
-      } else {
-        resultContent = JSON.stringify(result.content, null, 2);
-      }
-    }
-  }
-  
+  const { content: resultContent, isError } = extractResultContent(result);
+
   // Parse grep results to extract file paths and matches
   const parseGrepResults = (content: string) => {
-    const lines = content.split('\n').filter(line => line.trim());
+    const lines = content.split("\n").filter((line) => line.trim());
     const results: Array<{
       file: string;
       lineNumber: number;
       content: string;
     }> = [];
-    
-    lines.forEach(line => {
+
+    lines.forEach((line) => {
       // Common grep output format: filename:lineNumber:content
       const match = line.match(/^(.+?):(\d+):(.*)$/);
       if (match) {
         results.push({
           file: match[1],
           lineNumber: parseInt(match[2], 10),
-          content: match[3]
+          content: match[3],
         });
       }
     });
-    
+
     return results;
   };
-  
+
   const grepResults = result && !isError ? parseGrepResults(resultContent) : [];
-  
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 p-3 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
@@ -935,7 +1049,7 @@ export const GrepWidget: React.FC<{
           </div>
         )}
       </div>
-      
+
       {/* Search Parameters */}
       <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
         <div className="grid gap-2">
@@ -949,7 +1063,7 @@ export const GrepWidget: React.FC<{
               {pattern}
             </code>
           </div>
-          
+
           {/* Path */}
           {path && (
             <div className="flex items-start gap-3">
@@ -962,7 +1076,7 @@ export const GrepWidget: React.FC<{
               </code>
             </div>
           )}
-          
+
           {/* Include/Exclude patterns in a row */}
           {(include || exclude) && (
             <div className="flex gap-4">
@@ -977,7 +1091,7 @@ export const GrepWidget: React.FC<{
                   </code>
                 </div>
               )}
-              
+
               {exclude && (
                 <div className="flex items-center gap-2 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -993,9 +1107,9 @@ export const GrepWidget: React.FC<{
           )}
         </div>
       </div>
-      
+
       {/* Results */}
-      {result && (
+      {result ? (
         <div className="space-y-2">
           {isError ? (
             <div className="flex items-center gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
@@ -1017,17 +1131,17 @@ export const GrepWidget: React.FC<{
                 )}
                 <span>{grepResults.length} matches found</span>
               </button>
-              
+
               {isExpanded && (
                 <div className="rounded-lg border bg-zinc-950 overflow-hidden">
                   <div className="max-h-[400px] overflow-y-auto">
                     {grepResults.map((match, idx) => {
-                      const fileName = match.file.split('/').pop() || match.file;
-                      const dirPath = match.file.substring(0, match.file.lastIndexOf('/'));
-                      
+                      const fileName = match.file.split("/").pop() || match.file;
+                      const dirPath = match.file.substring(0, match.file.lastIndexOf("/"));
+
                       return (
-                        <div 
-                          key={idx} 
+                        <div
+                          key={idx}
                           className={cn(
                             "flex items-start gap-3 p-3 border-b border-zinc-800 hover:bg-zinc-900/50 transition-colors",
                             idx === grepResults.length - 1 && "border-b-0"
@@ -1039,7 +1153,7 @@ export const GrepWidget: React.FC<{
                               {match.lineNumber}
                             </span>
                           </div>
-                          
+
                           <div className="flex-1 space-y-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium text-blue-400 truncate">
@@ -1071,13 +1185,13 @@ export const GrepWidget: React.FC<{
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
 
 const getLanguage = (path: string) => {
-  const ext = path.split('.').pop()?.toLowerCase();
+  const ext = path.split(".").pop()?.toLowerCase();
   const languageMap: Record<string, string> = {
     ts: "typescript",
     tsx: "tsx",
@@ -1112,7 +1226,7 @@ const getLanguage = (path: string) => {
     toml: "ini",
     ini: "ini",
     dockerfile: "dockerfile",
-    makefile: "makefile"
+    makefile: "makefile",
   };
   return languageMap[ext || ""] || "text";
 };
@@ -1120,18 +1234,18 @@ const getLanguage = (path: string) => {
 /**
  * Widget for Edit tool - shows the edit operation
  */
-export const EditWidget: React.FC<{ 
-  file_path: string; 
-  old_string: string; 
+export const EditWidget: React.FC<{
+  file_path: string;
+  old_string: string;
   new_string: string;
-  result?: any;
+  result?: unknown;
 }> = ({ file_path, old_string, new_string, result: _result }) => {
   const { theme } = useTheme();
   const syntaxTheme = getClaudeSyntaxTheme(theme);
 
-  const diffResult = Diff.diffLines(old_string || '', new_string || '', { 
+  const diffResult = Diff.diffLines(old_string || '', new_string || '', {
     newlineIsToken: true,
-    ignoreWhitespace: false 
+    ignoreWhitespace: false,
   });
   const language = getLanguage(file_path);
 
@@ -1148,26 +1262,29 @@ export const EditWidget: React.FC<{
       <div className="rounded-lg border bg-zinc-950 overflow-hidden text-xs font-mono">
         <div className="max-h-[440px] overflow-y-auto overflow-x-auto">
           {diffResult.map((part, index) => {
-            const partClass = part.added 
-              ? 'bg-green-950/20' 
-              : part.removed 
-              ? 'bg-red-950/20'
-              : '';
-            
+            const partClass = part.added ? "bg-green-950/20" : part.removed ? "bg-red-950/20" : "";
+
             if (!part.added && !part.removed && part.count && part.count > 8) {
               return (
-                <div key={index} className="px-4 py-1 bg-zinc-900 border-y border-zinc-800 text-center text-zinc-500 text-xs">
+                <div
+                  key={index}
+                  className="px-4 py-1 bg-zinc-900 border-y border-zinc-800 text-center text-zinc-500 text-xs"
+                >
                   ... {part.count} unchanged lines ...
                 </div>
               );
             }
-            
-            const value = part.value.endsWith('\n') ? part.value.slice(0, -1) : part.value;
+
+            const value = part.value.endsWith("\n") ? part.value.slice(0, -1) : part.value;
 
             return (
               <div key={index} className={cn(partClass, "flex")}>
                 <div className="w-8 select-none text-center flex-shrink-0">
-                  {part.added ? <span className="text-green-400">+</span> : part.removed ? <span className="text-red-400">-</span> : null}
+                  {part.added ? (
+                    <span className="text-green-400">+</span>
+                  ) : part.removed ? (
+                    <span className="text-red-400">-</span>
+                  ) : null}
                 </div>
                 <div className="flex-1">
                   <SyntaxHighlighter
@@ -1178,13 +1295,13 @@ export const EditWidget: React.FC<{
                     customStyle={{
                       margin: 0,
                       padding: 0,
-                      background: 'transparent',
+                      background: "transparent",
                     }}
                     codeTagProps={{
                       style: {
-                        fontSize: '0.75rem',
-                        lineHeight: '1.6',
-                      }
+                        fontSize: "0.75rem",
+                        lineHeight: "1.6",
+                      },
                     }}
                   >
                     {value}
@@ -1205,16 +1322,16 @@ export const EditWidget: React.FC<{
 export const EditResultWidget: React.FC<{ content: string }> = ({ content }) => {
   const { theme } = useTheme();
   const syntaxTheme = getClaudeSyntaxTheme(theme);
-  
+
   // Parse the content to extract file path and code snippet
-  const lines = content.split('\n');
-  let filePath = '';
+  const lines = content.split("\n");
+  let filePath = "";
   const codeLines: { lineNumber: string; code: string }[] = [];
   let inCodeBlock = false;
-  
+
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\r$/, '');
-    if (line.includes('The file') && line.includes('has been updated')) {
+    const line = rawLine.replace(/\r$/, "");
+    if (line.includes("The file") && line.includes("has been updated")) {
       const match = line.match(/The file (.+) has been updated/);
       if (match) {
         filePath = match[1];
@@ -1231,12 +1348,12 @@ export const EditResultWidget: React.FC<{ content: string }> = ({ content }) => 
       }
     } else if (inCodeBlock) {
       // Allow non-numbered lines inside a code block (for empty lines)
-      codeLines.push({ lineNumber: '', code: line });
+      codeLines.push({ lineNumber: "", code: line });
     }
   }
 
-  const codeContent = codeLines.map(l => l.code).join('\n');
-  const firstNumberedLine = codeLines.find(l => l.lineNumber !== '');
+  const codeContent = codeLines.map((l) => l.code).join("\n");
+  const firstNumberedLine = codeLines.find((l) => l.lineNumber !== "");
   const startLineNumber = firstNumberedLine ? parseInt(firstNumberedLine.lineNumber) : 1;
   const language = getLanguage(filePath);
 
@@ -1261,13 +1378,13 @@ export const EditResultWidget: React.FC<{ content: string }> = ({ content }) => 
           wrapLongLines={false}
           customStyle={{
             margin: 0,
-            background: 'transparent',
-            lineHeight: '1.6'
+            background: "transparent",
+            lineHeight: "1.6",
           }}
           codeTagProps={{
             style: {
-              fontSize: '0.75rem'
-            }
+              fontSize: "0.75rem",
+            },
           }}
           lineNumberStyle={{
             minWidth: "3.5rem",
@@ -1286,50 +1403,50 @@ export const EditResultWidget: React.FC<{ content: string }> = ({ content }) => 
 /**
  * Widget for MCP (Model Context Protocol) tools
  */
-export const MCPWidget: React.FC<{ 
-  toolName: string; 
-  input?: any;
-  result?: any;
-}> = ({ toolName, input, result: _result }) => {
+export const MCPWidget: React.FC<{
+  toolName: string;
+  input?: unknown;
+  result?: unknown;
+}> = ({ toolName, input, result: _result }): React.ReactElement => {
   const [isExpanded, setIsExpanded] = useState(false);
   const { theme } = useTheme();
   const syntaxTheme = getClaudeSyntaxTheme(theme);
-  
+
   // Parse the tool name to extract components
   // Format: mcp__namespace__method
-  const parts = toolName.split('__');
-  const namespace = parts[1] || '';
-  const method = parts[2] || '';
-  
+  const parts = toolName.split("__");
+  const namespace = parts[1] || "";
+  const method = parts[2] || "";
+
   // Format namespace for display (handle kebab-case and snake_case)
   const formatNamespace = (ns: string) => {
     return ns
-      .replace(/-/g, ' ')
-      .replace(/_/g, ' ')
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+      .replace(/-/g, " ")
+      .replace(/_/g, " ")
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   };
-  
+
   // Format method name
   const formatMethod = (m: string) => {
     return m
-      .replace(/_/g, ' ')
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+      .replace(/_/g, " ")
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   };
-  
+
   const hasInput = input && Object.keys(input).length > 0;
-  const inputString = hasInput ? JSON.stringify(input, null, 2) : '';
+  const inputString = hasInput ? JSON.stringify(input, null, 2) : "";
   const isLargeInput = inputString.length > 200;
-  
+
   // Count tokens approximation (very rough estimate)
   const estimateTokens = (str: string) => {
     // Rough approximation: ~4 characters per token
     return Math.ceil(str.length / 4);
   };
-  
+
   const inputTokens = hasInput ? estimateTokens(inputString) : 0;
 
   return (
@@ -1342,33 +1459,37 @@ export const MCPWidget: React.FC<{
               <Package2 className="h-4 w-4 text-violet-500" />
               <Sparkles className="h-2.5 w-2.5 text-violet-400 absolute -top-1 -right-1" />
             </div>
-            <span className="text-sm font-medium text-violet-600 dark:text-violet-400">MCP Tool</span>
+            <span className="text-sm font-medium text-violet-600 dark:text-violet-400">
+              MCP Tool
+            </span>
           </div>
-          {hasInput && (
-            <div className="flex items-center gap-2">
-              <Badge 
-                variant="outline" 
-                className="text-xs border-violet-500/30 text-violet-600 dark:text-violet-400"
-              >
-                ~{inputTokens} tokens
-              </Badge>
-              {isLargeInput && (
-                <button
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className="text-violet-500 hover:text-violet-600 transition-colors"
+          {
+            (hasInput && (
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className="text-xs border-violet-500/30 text-violet-600 dark:text-violet-400"
                 >
-                  {isExpanded ? (
-                    <ChevronUp className="h-3.5 w-3.5" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  )}
-                </button>
-              )}
-            </div>
-          )}
+                  ~{inputTokens} tokens
+                </Badge>
+                {isLargeInput && (
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="text-violet-500 hover:text-violet-600 transition-colors"
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                )}
+              </div>
+            )) as React.ReactNode
+          }
         </div>
       </div>
-      
+
       {/* Tool Path */}
       <div className="px-4 py-3 space-y-3">
         <div className="flex items-center gap-2 text-sm">
@@ -1386,69 +1507,72 @@ export const MCPWidget: React.FC<{
             </code>
           </div>
         </div>
-        
+
         {/* Input Parameters */}
-        {hasInput && (
-          <div className={cn(
-            "transition-all duration-200",
-            !isExpanded && isLargeInput && "max-h-[200px]"
-          )}>
-            <div className="relative">
-              <div className={cn(
-                "rounded-lg border bg-zinc-950/50 overflow-hidden",
+        {
+          (hasInput && (
+            <div
+              className={cn(
+                "transition-all duration-200",
                 !isExpanded && isLargeInput && "max-h-[200px]"
-              )}>
-                <div className="px-3 py-2 border-b bg-zinc-900/50 flex items-center gap-2">
-                  <Code className="h-3 w-3 text-violet-500" />
-                  <span className="text-xs font-mono text-muted-foreground">Parameters</span>
-                </div>
-                <div className={cn(
-                  "overflow-auto",
-                  !isExpanded && isLargeInput && "max-h-[150px]"
-                )}>
-                  <SyntaxHighlighter
-                    language="json"
-                    style={syntaxTheme}
-                    customStyle={{
-                      margin: 0,
-                      padding: '0.75rem',
-                      background: 'transparent',
-                      fontSize: '0.75rem',
-                      lineHeight: '1.5',
-                    }}
-                    wrapLongLines={false}
+              )}
+            >
+              <div className="relative">
+                <div
+                  className={cn(
+                    "rounded-lg border bg-zinc-950/50 overflow-hidden",
+                    !isExpanded && isLargeInput && "max-h-[200px]"
+                  )}
+                >
+                  <div className="px-3 py-2 border-b bg-zinc-900/50 flex items-center gap-2">
+                    <Code className="h-3 w-3 text-violet-500" />
+                    <span className="text-xs font-mono text-muted-foreground">Parameters</span>
+                  </div>
+                  <div
+                    className={cn("overflow-auto", !isExpanded && isLargeInput && "max-h-[150px]")}
                   >
-                    {inputString}
-                  </SyntaxHighlighter>
+                    <SyntaxHighlighter
+                      language="json"
+                      style={syntaxTheme}
+                      customStyle={{
+                        margin: 0,
+                        padding: '0.75rem',
+                        background: 'transparent',
+                        fontSize: '0.75rem',
+                        lineHeight: '1.5',
+                      }}
+                      wrapLongLines={false}
+                    >
+                      {inputString}
+                    </SyntaxHighlighter>
+                  </div>
                 </div>
+
+                {/* Gradient fade for collapsed view */}
+                {!isExpanded && isLargeInput && (
+                  <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
+                )}
               </div>
-              
-              {/* Gradient fade for collapsed view */}
+
+              {/* Expand hint */}
               {!isExpanded && isLargeInput && (
-                <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
+                <div className="text-center mt-2">
+                  <button
+                    onClick={() => setIsExpanded(true)}
+                    className="text-xs text-violet-500 hover:text-violet-600 transition-colors inline-flex items-center gap-1"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                    Show full parameters
+                  </button>
+                </div>
               )}
             </div>
-            
-            {/* Expand hint */}
-            {!isExpanded && isLargeInput && (
-              <div className="text-center mt-2">
-                <button
-                  onClick={() => setIsExpanded(true)}
-                  className="text-xs text-violet-500 hover:text-violet-600 transition-colors inline-flex items-center gap-1"
-                >
-                  <ChevronDown className="h-3 w-3" />
-                  Show full parameters
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        
+          )) as React.ReactNode
+        }
+
         {/* No input message */}
         {!hasInput && (
-          <div className="text-xs text-muted-foreground italic px-2">
-            No parameters required
-          </div>
+          <div className="text-xs text-muted-foreground italic px-2">No parameters required</div>
         )}
       </div>
     </div>
@@ -1458,7 +1582,7 @@ export const MCPWidget: React.FC<{
 /**
  * Widget for user commands (e.g., model, clear)
  */
-export const CommandWidget: React.FC<{ 
+export const CommandWidget: React.FC<{
   commandName: string;
   commandMessage: string;
   commandArgs?: string;
@@ -1488,7 +1612,7 @@ export const CommandWidget: React.FC<{
 /**
  * Widget for command output/stdout
  */
-export const CommandOutputWidget: React.FC<{ 
+export const CommandOutputWidget: React.FC<{
   output: string;
   onLinkDetected?: (url: string) => void;
 }> = ({ output, onLinkDetected }) => {
@@ -1506,40 +1630,42 @@ export const CommandOutputWidget: React.FC<{
   // Parse ANSI codes for basic styling
   const parseAnsiToReact = (text: string) => {
     // Simple ANSI parsing - handles bold (\u001b[1m) and reset (\u001b[22m)
+    // eslint-disable-next-line no-control-regex
     const parts = text.split(/(\u001b\[\d+m)/);
     let isBold = false;
     const elements: React.ReactNode[] = [];
-    
+
     parts.forEach((part, idx) => {
-      if (part === '\u001b[1m') {
+      if (part === "\u001b[1m") {
         isBold = true;
         return;
-      } else if (part === '\u001b[22m') {
+      } else if (part === "\u001b[22m") {
         isBold = false;
         return;
+        // eslint-disable-next-line no-control-regex
       } else if (part.match(/\u001b\[\d+m/)) {
         // Ignore other ANSI codes for now
         return;
       }
-      
+
       if (!part) return;
-      
+
       // Make links clickable within this part
       const linkElements = makeLinksClickable(part, (url) => {
         onLinkDetected?.(url);
       });
-      
+
       if (isBold) {
         elements.push(
           <span key={idx} className="font-bold">
             {linkElements}
-        </span>
-      );
+          </span>
+        );
       } else {
         elements.push(...linkElements);
       }
     });
-    
+
     return elements;
   };
 
@@ -1551,7 +1677,11 @@ export const CommandOutputWidget: React.FC<{
       </div>
       <div className="p-3">
         <pre className="text-sm font-mono text-zinc-300 whitespace-pre-wrap">
-          {output ? parseAnsiToReact(output) : <span className="text-zinc-500 italic">No output</span>}
+          {output ? (
+            parseAnsiToReact(output)
+          ) : (
+            <span className="text-zinc-500 italic">No output</span>
+          )}
         </pre>
       </div>
     </div>
@@ -1561,7 +1691,7 @@ export const CommandOutputWidget: React.FC<{
 /**
  * Widget for AI-generated summaries
  */
-export const SummaryWidget: React.FC<{ 
+export const SummaryWidget: React.FC<{
   summary: string;
   leafUuid?: string;
 }> = ({ summary, leafUuid }) => {
@@ -1593,13 +1723,13 @@ export const SummaryWidget: React.FC<{
 export const MultiEditWidget: React.FC<{
   file_path: string;
   edits: Array<{ old_string: string; new_string: string }>;
-  result?: any;
+  result?: unknown;
 }> = ({ file_path, edits, result: _result }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const language = getLanguage(file_path);
   const { theme } = useTheme();
   const syntaxTheme = getClaudeSyntaxTheme(theme);
-  
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-2">
@@ -1611,50 +1741,63 @@ export const MultiEditWidget: React.FC<{
           <FileText className="h-3 w-3 text-blue-500" />
           <code className="text-xs font-mono text-blue-500">{file_path}</code>
         </div>
-        
+
         <div className="space-y-1">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            <ChevronRight className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")} />
-            {edits.length} edit{edits.length !== 1 ? 's' : ''}
+            <ChevronRight
+              className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")}
+            />
+            {edits.length} edit{edits.length !== 1 ? "s" : ""}
           </button>
-          
+
           {isExpanded && (
             <div className="space-y-3 mt-3">
               {edits.map((edit, index) => {
-                const diffResult = Diff.diffLines(edit.old_string || '', edit.new_string || '', { 
+                const diffResult = Diff.diffLines(edit.old_string || "", edit.new_string || "", {
                   newlineIsToken: true,
-                  ignoreWhitespace: false 
+                  ignoreWhitespace: false,
                 });
-                
+
                 return (
                   <div key={index} className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">Edit {index + 1}</div>
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Edit {index + 1}
+                    </div>
                     <div className="rounded-lg border bg-zinc-950 overflow-hidden text-xs font-mono">
                       <div className="max-h-[300px] overflow-y-auto overflow-x-auto">
                         {diffResult.map((part, partIndex) => {
-                          const partClass = part.added 
-                            ? 'bg-green-950/20' 
-                            : part.removed 
-                            ? 'bg-red-950/20'
-                            : '';
-                          
+                          const partClass = part.added
+                            ? "bg-green-950/20"
+                            : part.removed
+                              ? "bg-red-950/20"
+                              : "";
+
                           if (!part.added && !part.removed && part.count && part.count > 8) {
                             return (
-                              <div key={partIndex} className="px-4 py-1 bg-zinc-900 border-y border-zinc-800 text-center text-zinc-500 text-xs">
+                              <div
+                                key={partIndex}
+                                className="px-4 py-1 bg-zinc-900 border-y border-zinc-800 text-center text-zinc-500 text-xs"
+                              >
                                 ... {part.count} unchanged lines ...
                               </div>
                             );
                           }
-                          
-                          const value = part.value.endsWith('\n') ? part.value.slice(0, -1) : part.value;
+
+                          const value = part.value.endsWith("\n")
+                            ? part.value.slice(0, -1)
+                            : part.value;
 
                           return (
                             <div key={partIndex} className={cn(partClass, "flex")}>
                               <div className="w-8 select-none text-center flex-shrink-0">
-                                {part.added ? <span className="text-green-400">+</span> : part.removed ? <span className="text-red-400">-</span> : null}
+                                {part.added ? (
+                                  <span className="text-green-400">+</span>
+                                ) : part.removed ? (
+                                  <span className="text-red-400">-</span>
+                                ) : null}
                               </div>
                               <div className="flex-1">
                                 <SyntaxHighlighter
@@ -1665,13 +1808,13 @@ export const MultiEditWidget: React.FC<{
                                   customStyle={{
                                     margin: 0,
                                     padding: 0,
-                                    background: 'transparent',
+                                    background: "transparent",
                                   }}
                                   codeTagProps={{
                                     style: {
-                                      fontSize: '0.75rem',
-                                      lineHeight: '1.6',
-                                    }
+                                      fontSize: "0.75rem",
+                                      lineHeight: "1.6",
+                                    },
                                   }}
                                 >
                                   {value}
@@ -1696,7 +1839,7 @@ export const MultiEditWidget: React.FC<{
 /**
  * Widget for displaying MultiEdit tool results with diffs
  */
-export const MultiEditResultWidget: React.FC<{ 
+export const MultiEditResultWidget: React.FC<{
   content: string;
   edits?: Array<{ old_string: string; new_string: string }>;
 }> = ({ content, edits }) => {
@@ -1710,19 +1853,21 @@ export const MultiEditResultWidget: React.FC<{
             {edits.length} Changes Applied
           </span>
         </div>
-        
+
         <div className="space-y-4">
           {edits.map((edit, index) => {
             // Split the strings into lines for diff display
-            const oldLines = edit.old_string.split('\n');
-            const newLines = edit.new_string.split('\n');
-            
+            const oldLines = edit.old_string.split("\n");
+            const newLines = edit.new_string.split("\n");
+
             return (
               <div key={index} className="border border-border/50 rounded-md overflow-hidden">
                 <div className="px-3 py-1 bg-muted/50 border-b border-border/50">
-                  <span className="text-xs font-medium text-muted-foreground">Change {index + 1}</span>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Change {index + 1}
+                  </span>
                 </div>
-                
+
                 <div className="font-mono text-xs">
                   {/* Show removed lines */}
                   {oldLines.map((line, lineIndex) => (
@@ -1734,11 +1879,11 @@ export const MultiEditResultWidget: React.FC<{
                         -{lineIndex + 1}
                       </span>
                       <pre className="flex-1 px-3 py-1 text-red-700 dark:text-red-300 overflow-x-auto">
-                        <code>{line || ' '}</code>
+                        <code>{line || " "}</code>
                       </pre>
                     </div>
                   ))}
-                  
+
                   {/* Show added lines */}
                   {newLines.map((line, lineIndex) => (
                     <div
@@ -1749,7 +1894,7 @@ export const MultiEditResultWidget: React.FC<{
                         +{lineIndex + 1}
                       </span>
                       <pre className="flex-1 px-3 py-1 text-green-700 dark:text-green-300 overflow-x-auto">
-                        <code>{line || ' '}</code>
+                        <code>{line || " "}</code>
                       </pre>
                     </div>
                   ))}
@@ -1761,7 +1906,7 @@ export const MultiEditResultWidget: React.FC<{
       </div>
     );
   }
-  
+
   // Fallback to simple content display
   return (
     <div className="p-3 bg-muted/50 rounded-md border">
@@ -1777,7 +1922,7 @@ export const SystemReminderWidget: React.FC<{ message: string }> = ({ message })
   // Extract icon based on message content
   let icon = <Info className="h-4 w-4" />;
   let colorClass = "border-blue-500/20 bg-blue-500/5 text-blue-600";
-  
+
   if (message.toLowerCase().includes("warning")) {
     icon = <AlertCircle className="h-4 w-4" />;
     colorClass = "border-yellow-500/20 bg-yellow-500/5 text-yellow-600";
@@ -1785,7 +1930,7 @@ export const SystemReminderWidget: React.FC<{ message: string }> = ({ message })
     icon = <AlertCircle className="h-4 w-4" />;
     colorClass = "border-destructive/20 bg-destructive/5 text-destructive";
   }
-  
+
   return (
     <div className={cn("flex items-start gap-2 p-3 rounded-md border", colorClass)}>
       <div className="mt-0.5">{icon}</div>
@@ -1805,75 +1950,84 @@ export const SystemInitializedWidget: React.FC<{
   tools?: string[];
 }> = ({ sessionId, model, cwd, tools = [] }) => {
   const [mcpExpanded, setMcpExpanded] = useState(false);
-  
+
   // Separate regular tools from MCP tools
-  const regularTools = tools.filter(tool => !tool.startsWith('mcp__'));
-  const mcpTools = tools.filter(tool => tool.startsWith('mcp__'));
-  
+  const regularTools = tools.filter((tool) => !tool.startsWith("mcp__"));
+  const mcpTools = tools.filter((tool) => tool.startsWith("mcp__"));
+
   // Tool icon mapping for regular tools
   const toolIcons: Record<string, LucideIcon> = {
-    'task': CheckSquare,
-    'bash': Terminal,
-    'glob': FolderSearch,
-    'grep': Search,
-    'ls': List,
-    'exit_plan_mode': LogOut,
-    'read': FileText,
-    'edit': Edit3,
-    'multiedit': Edit3,
-    'write': FilePlus,
-    'notebookread': Book,
-    'notebookedit': BookOpen,
-    'webfetch': Globe,
-    'todoread': ListChecks,
-    'todowrite': ListPlus,
-    'websearch': Globe2,
+    task: CheckSquare,
+    bash: Terminal,
+    glob: FolderSearch,
+    grep: Search,
+    ls: List,
+    exit_plan_mode: LogOut,
+    read: FileText,
+    edit: Edit3,
+    multiedit: Edit3,
+    write: FilePlus,
+    notebookread: Book,
+    notebookedit: BookOpen,
+    webfetch: Globe,
+    todoread: ListChecks,
+    todowrite: ListPlus,
+    websearch: Globe2,
   };
-  
+
   // Get icon for a tool, fallback to Wrench
   const getToolIcon = (toolName: string) => {
     const normalizedName = toolName.toLowerCase();
     return toolIcons[normalizedName] || Wrench;
   };
-  
+
   // Format MCP tool name (remove mcp__ prefix and format underscores)
   const formatMcpToolName = (toolName: string) => {
     // Remove mcp__ prefix
-    const withoutPrefix = toolName.replace(/^mcp__/, '');
+    const withoutPrefix = toolName.replace(/^mcp__/, "");
     // Split by double underscores first (provider separator)
-    const parts = withoutPrefix.split('__');
+    const parts = withoutPrefix.split("__");
     if (parts.length >= 2) {
       // Format provider name and method name separately
-      const provider = parts[0].replace(/_/g, ' ').replace(/-/g, ' ')
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
-      const method = parts.slice(1).join('__').replace(/_/g, ' ')
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+      const provider = parts[0]
+        .replace(/_/g, " ")
+        .replace(/-/g, " ")
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+      const method = parts
+        .slice(1)
+        .join("__")
+        .replace(/_/g, " ")
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
       return { provider, method };
     }
     // Fallback formatting
     return {
-      provider: 'MCP',
-      method: withoutPrefix.replace(/_/g, ' ')
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
+      provider: "MCP",
+      method: withoutPrefix
+        .replace(/_/g, " ")
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
     };
   };
-  
+
   // Group MCP tools by provider
-  const mcpToolsByProvider = mcpTools.reduce((acc, tool) => {
-    const { provider } = formatMcpToolName(tool);
-    if (!acc[provider]) {
-      acc[provider] = [];
-    }
-    acc[provider].push(tool);
-    return acc;
-  }, {} as Record<string, string[]>);
-  
+  const mcpToolsByProvider = mcpTools.reduce(
+    (acc, tool) => {
+      const { provider } = formatMcpToolName(tool);
+      if (!acc[provider]) {
+        acc[provider] = [];
+      }
+      acc[provider].push(tool);
+      return acc;
+    },
+    {} as Record<string, string[]>
+  );
+
   return (
     <Card className="border-blue-500/20 bg-blue-500/5">
       <CardContent className="p-4">
@@ -1881,7 +2035,7 @@ export const SystemInitializedWidget: React.FC<{
           <Settings className="h-5 w-5 text-blue-500 mt-0.5" />
           <div className="flex-1 space-y-4">
             <h4 className="font-semibold text-sm">System Initialized</h4>
-            
+
             {/* Session Info */}
             <div className="space-y-2">
               {sessionId && (
@@ -1893,17 +2047,15 @@ export const SystemInitializedWidget: React.FC<{
                   </code>
                 </div>
               )}
-              
+
               {model && (
                 <div className="flex items-center gap-2 text-xs">
                   <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-muted-foreground">Model:</span>
-                  <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                    {model}
-                  </code>
+                  <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{model}</code>
                 </div>
               )}
-              
+
               {cwd && (
                 <div className="flex items-center gap-2 text-xs">
                   <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1914,7 +2066,7 @@ export const SystemInitializedWidget: React.FC<{
                 </div>
               )}
             </div>
-            
+
             {/* Regular Tools */}
             {regularTools.length > 0 && (
               <div className="space-y-2">
@@ -1928,9 +2080,9 @@ export const SystemInitializedWidget: React.FC<{
                   {regularTools.map((tool, idx) => {
                     const Icon = getToolIcon(tool);
                     return (
-                      <Badge 
-                        key={idx} 
-                        variant="secondary" 
+                      <Badge
+                        key={idx}
+                        variant="secondary"
                         className="text-xs py-0.5 px-2 flex items-center gap-1"
                       >
                         <Icon className="h-3 w-3" />
@@ -1941,7 +2093,7 @@ export const SystemInitializedWidget: React.FC<{
                 </div>
               </div>
             )}
-            
+
             {/* MCP Tools */}
             {mcpTools.length > 0 && (
               <div className="space-y-2">
@@ -1951,12 +2103,11 @@ export const SystemInitializedWidget: React.FC<{
                 >
                   <Package className="h-3.5 w-3.5" />
                   <span>MCP Services ({mcpTools.length})</span>
-                  <ChevronDown className={cn(
-                    "h-3 w-3 transition-transform",
-                    mcpExpanded && "rotate-180"
-                  )} />
+                  <ChevronDown
+                    className={cn("h-3 w-3 transition-transform", mcpExpanded && "rotate-180")}
+                  />
                 </button>
-                
+
                 {mcpExpanded && (
                   <div className="ml-5 space-y-3">
                     {Object.entries(mcpToolsByProvider).map(([provider, providerTools]) => (
@@ -1970,9 +2121,9 @@ export const SystemInitializedWidget: React.FC<{
                           {providerTools.map((tool, idx) => {
                             const { method } = formatMcpToolName(tool);
                             return (
-                              <Badge 
-                                key={idx} 
-                                variant="outline" 
+                              <Badge
+                                key={idx}
+                                variant="outline"
                                 className="text-xs py-0 px-1.5 font-normal"
                               >
                                 {method}
@@ -1986,12 +2137,10 @@ export const SystemInitializedWidget: React.FC<{
                 )}
               </div>
             )}
-            
+
             {/* Show message if no tools */}
             {tools.length === 0 && (
-              <div className="text-xs text-muted-foreground italic">
-                No tools available
-              </div>
+              <div className="text-xs text-muted-foreground italic">No tools available</div>
             )}
           </div>
         </div>
@@ -2003,13 +2152,13 @@ export const SystemInitializedWidget: React.FC<{
 /**
  * Widget for Task tool - displays sub-agent task information
  */
-export const TaskWidget: React.FC<{ 
-  description?: string; 
+export const TaskWidget: React.FC<{
+  description?: string;
   prompt?: string;
-  result?: any;
+  result?: unknown;
 }> = ({ description, prompt, result: _result }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-2">
@@ -2019,28 +2168,32 @@ export const TaskWidget: React.FC<{
         </div>
         <span className="text-sm font-medium">Spawning Sub-Agent Task</span>
       </div>
-      
+
       <div className="ml-6 space-y-3">
         {description && (
           <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
             <div className="flex items-center gap-2 mb-1">
               <Zap className="h-3.5 w-3.5 text-purple-500" />
-              <span className="text-xs font-medium text-purple-600 dark:text-purple-400">Task Description</span>
+              <span className="text-xs font-medium text-purple-600 dark:text-purple-400">
+                Task Description
+              </span>
             </div>
             <p className="text-sm text-foreground ml-5">{description}</p>
           </div>
         )}
-        
+
         {prompt && (
           <div className="space-y-2">
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              <ChevronRight className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")} />
+              <ChevronRight
+                className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")}
+              />
               <span>Task Instructions</span>
             </button>
-            
+
             {isExpanded && (
               <div className="rounded-lg border bg-muted/30 p-3">
                 <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
@@ -2058,54 +2211,57 @@ export const TaskWidget: React.FC<{
 /**
  * Widget for WebSearch tool - displays web search query and results
  */
-export const WebSearchWidget: React.FC<{ 
-  query: string; 
-  result?: any;
-}> = ({ query, result }) => {
+export const WebSearchWidget = ({
+  query,
+  result,
+}: {
+  query: string;
+  result?: unknown;
+}): React.JSX.Element => {
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
-  
+
   // Parse the result to extract all links sections and build a structured representation
   const parseSearchResult = (resultContent: string) => {
     const sections: Array<{
-      type: 'text' | 'links';
+      type: "text" | "links";
       content: string | Array<{ title: string; url: string }>;
     }> = [];
-    
+
     // Split by "Links: [" to find all link sections
     const parts = resultContent.split(/Links:\s*\[/);
-    
+
     // First part is always text (or empty)
     if (parts[0]) {
-      sections.push({ type: 'text', content: parts[0].trim() });
+      sections.push({ type: "text", content: parts[0].trim() });
     }
-    
+
     // Process each links section
-    parts.slice(1).forEach(part => {
+    parts.slice(1).forEach((part) => {
       try {
         // Find the closing bracket
-        const closingIndex = part.indexOf(']');
+        const closingIndex = part.indexOf("]");
         if (closingIndex === -1) return;
-        
-        const linksJson = '[' + part.substring(0, closingIndex + 1);
+
+        const linksJson = `[${part.substring(0, closingIndex + 1)}`;
         const remainingText = part.substring(closingIndex + 1).trim();
-        
+
         // Parse the JSON array
         const links = JSON.parse(linksJson);
-        sections.push({ type: 'links', content: links });
-        
+        sections.push({ type: "links", content: links });
+
         // Add any remaining text
         if (remainingText) {
-          sections.push({ type: 'text', content: remainingText });
+          sections.push({ type: "text", content: remainingText });
         }
-      } catch (e) {
+      } catch (_e) {
         // If parsing fails, treat it as text
-        sections.push({ type: 'text', content: 'Links: [' + part });
+        sections.push({ type: "text", content: `Links: [${part}` });
       }
     });
-    
+
     return sections;
   };
-  
+
   const toggleSection = (index: number) => {
     const newExpanded = new Set(expandedSections);
     if (newExpanded.has(index)) {
@@ -2115,56 +2271,62 @@ export const WebSearchWidget: React.FC<{
     }
     setExpandedSections(newExpanded);
   };
-  
+
   // Extract result content if available
-  let searchResults: {
+  const searchResults: {
     sections: Array<{
-      type: 'text' | 'links';
+      type: "text" | "links";
       content: string | Array<{ title: string; url: string }>;
     }>;
     noResults: boolean;
   } = { sections: [], noResults: false };
-  
+
   if (result) {
-    let resultContent = '';
-    if (typeof result.content === 'string') {
-      resultContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        resultContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        resultContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
+    let resultContent = "";
+    const resultObj = result as ToolResult;
+    if (typeof resultObj.content === "string") {
+      resultContent = resultObj.content;
+    } else if (resultObj.content && typeof resultObj.content === "object") {
+      if ((resultObj.content as ContentObject).text) {
+        resultContent = (resultObj.content as ContentObject).text || "";
+      } else if (Array.isArray(resultObj.content)) {
+        resultContent = resultObj.content
+          .map((c: unknown) =>
+            typeof c === "string" ? c : (c as ContentObject).text || JSON.stringify(c)
+          )
+          .join("\n");
       } else {
-        resultContent = JSON.stringify(result.content, null, 2);
+        resultContent = JSON.stringify(resultObj.content, null, 2);
       }
     }
-    
-    searchResults.noResults = resultContent.toLowerCase().includes('no links found') || 
-                               resultContent.toLowerCase().includes('no results');
+
+    searchResults.noResults =
+      resultContent.toLowerCase().includes("no links found") ||
+      resultContent.toLowerCase().includes("no results");
     searchResults.sections = parseSearchResult(resultContent);
   }
-  
+
   const handleLinkClick = async (url: string) => {
     try {
       await open(url);
     } catch (error) {
-      console.error('Failed to open URL:', error);
+      logger.error("Failed to open URL:", error);
     }
   };
-  
+
   return (
     <div className="flex flex-col gap-2">
       {/* Subtle Search Query Header */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/5 border border-blue-500/10">
         <Globe className="h-4 w-4 text-blue-500/70" />
-        <span className="text-xs font-medium uppercase tracking-wider text-blue-600/70 dark:text-blue-400/70">Web Search</span>
+        <span className="text-xs font-medium uppercase tracking-wider text-blue-600/70 dark:text-blue-400/70">
+          Web Search
+        </span>
         <span className="text-sm text-muted-foreground/80 flex-1 truncate">{query}</span>
       </div>
-      
+
       {/* Results */}
-      {result && (
+      {result ? (
         <div className="rounded-lg border bg-background/50 backdrop-blur-sm overflow-hidden">
           {!searchResults.sections.length ? (
             <div className="px-3 py-2 flex items-center gap-2 text-muted-foreground">
@@ -2185,16 +2347,16 @@ export const WebSearchWidget: React.FC<{
           ) : (
             <div className="p-3 space-y-3">
               {searchResults.sections.map((section, idx) => {
-                if (section.type === 'text') {
+                if (section.type === "text") {
                   return (
                     <div key={idx} className="prose prose-sm dark:prose-invert max-w-none">
                       <ReactMarkdown>{section.content as string}</ReactMarkdown>
                     </div>
                   );
-                } else if (section.type === 'links' && Array.isArray(section.content)) {
+                } else if (section.type === "links" && Array.isArray(section.content)) {
                   const links = section.content;
                   const isExpanded = expandedSections.has(idx);
-                  
+
                   return (
                     <div key={idx} className="space-y-1.5">
                       {/* Toggle Button */}
@@ -2207,9 +2369,11 @@ export const WebSearchWidget: React.FC<{
                         ) : (
                           <ChevronRight className="h-3 w-3" />
                         )}
-                        <span>{links.length} result{links.length !== 1 ? 's' : ''}</span>
+                        <span>
+                          {links.length} result{links.length !== 1 ? "s" : ""}
+                        </span>
                       </button>
-                      
+
                       {/* Links Display */}
                       {isExpanded ? (
                         /* Expanded Card View */
@@ -2262,7 +2426,7 @@ export const WebSearchWidget: React.FC<{
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
@@ -2271,15 +2435,15 @@ export const WebSearchWidget: React.FC<{
  * Widget for displaying AI thinking/reasoning content
  * Collapsible and closed by default
  */
-export const ThinkingWidget: React.FC<{ 
+export const ThinkingWidget: React.FC<{
   thinking: string;
   signature?: string;
 }> = ({ thinking }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  
+
   // Strip whitespace from thinking content
   const trimmedThinking = thinking.trim();
-  
+
   return (
     <div className="rounded-lg border border-gray-500/20 bg-gray-500/5 overflow-hidden">
       <button
@@ -2295,12 +2459,11 @@ export const ThinkingWidget: React.FC<{
             Thinking...
           </span>
         </div>
-        <ChevronRight className={cn(
-          "h-4 w-4 text-gray-500 transition-transform",
-          isExpanded && "rotate-90"
-        )} />
+        <ChevronRight
+          className={cn("h-4 w-4 text-gray-500 transition-transform", isExpanded && "rotate-90")}
+        />
       </button>
-      
+
       {isExpanded && (
         <div className="px-4 pb-4 pt-2 border-t border-gray-500/20">
           <pre className="text-xs font-mono text-gray-600 dark:text-gray-400 whitespace-pre-wrap bg-gray-500/5 p-3 rounded-lg italic">
@@ -2315,47 +2478,52 @@ export const ThinkingWidget: React.FC<{
 /**
  * Widget for WebFetch tool - displays URL fetching with optional prompts
  */
-export const WebFetchWidget: React.FC<{ 
+export const WebFetchWidget: React.FC<{
   url: string;
   prompt?: string;
-  result?: any;
+  result?: unknown;
 }> = ({ url, prompt, result }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showFullContent, setShowFullContent] = useState(false);
-  
+
   // Extract result content if available
-  let fetchedContent = '';
-  let isLoading = !result;
+  let fetchedContent = "";
+  const isLoading = !result;
   let hasError = false;
-  
+
   if (result) {
-    if (typeof result.content === 'string') {
-      fetchedContent = result.content;
-    } else if (result.content && typeof result.content === 'object') {
-      if (result.content.text) {
-        fetchedContent = result.content.text;
-      } else if (Array.isArray(result.content)) {
-        fetchedContent = result.content
-          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
-          .join('\n');
+    const resultObj = result as ToolResult;
+    if (typeof resultObj.content === "string") {
+      fetchedContent = resultObj.content;
+    } else if (resultObj.content && typeof resultObj.content === "object") {
+      if ((resultObj.content as ContentObject).text) {
+        fetchedContent = (resultObj.content as ContentObject).text || "";
+      } else if (Array.isArray(resultObj.content)) {
+        fetchedContent = resultObj.content
+          .map((c: unknown) =>
+            typeof c === "string" ? c : (c as ContentObject).text || JSON.stringify(c)
+          )
+          .join("\n");
       } else {
-        fetchedContent = JSON.stringify(result.content, null, 2);
+        fetchedContent = JSON.stringify(resultObj.content, null, 2);
       }
     }
-    
+
     // Check if there's an error
-    hasError = result.is_error || 
-               fetchedContent.toLowerCase().includes('error') ||
-               fetchedContent.toLowerCase().includes('failed');
+    hasError =
+      resultObj.is_error ||
+      fetchedContent.toLowerCase().includes("error") ||
+      fetchedContent.toLowerCase().includes("failed");
   }
-  
+
   // Truncate content for preview
   const maxPreviewLength = 500;
   const isTruncated = fetchedContent.length > maxPreviewLength;
-  const previewContent = isTruncated && !showFullContent
-    ? fetchedContent.substring(0, maxPreviewLength) + '...'
-    : fetchedContent;
-  
+  const previewContent =
+    isTruncated && !showFullContent
+      ? `${fetchedContent.substring(0, maxPreviewLength)}...`
+      : fetchedContent;
+
   // Extract domain from URL for display
   const getDomain = (urlString: string) => {
     try {
@@ -2365,15 +2533,15 @@ export const WebFetchWidget: React.FC<{
       return urlString;
     }
   };
-  
+
   const handleUrlClick = async () => {
     try {
       await open(url);
     } catch (error) {
-      console.error('Failed to open URL:', error);
+      logger.error("Failed to open URL:", error);
     }
   };
-  
+
   return (
     <div className="flex flex-col gap-2">
       {/* Header with URL and optional prompt */}
@@ -2381,7 +2549,9 @@ export const WebFetchWidget: React.FC<{
         {/* URL Display */}
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/5 border border-purple-500/10">
           <Globe className="h-4 w-4 text-purple-500/70" />
-          <span className="text-xs font-medium uppercase tracking-wider text-purple-600/70 dark:text-purple-400/70">Fetching</span>
+          <span className="text-xs font-medium uppercase tracking-wider text-purple-600/70 dark:text-purple-400/70">
+            Fetching
+          </span>
           <button
             onClick={handleUrlClick}
             className="text-sm text-foreground/80 hover:text-foreground flex-1 truncate text-left hover:underline decoration-purple-500/50"
@@ -2389,7 +2559,7 @@ export const WebFetchWidget: React.FC<{
             {url}
           </button>
         </div>
-        
+
         {/* Prompt Display */}
         {prompt && (
           <div className="ml-6 space-y-1">
@@ -2397,22 +2567,22 @@ export const WebFetchWidget: React.FC<{
               onClick={() => setIsExpanded(!isExpanded)}
               className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              <ChevronRight className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")} />
+              <ChevronRight
+                className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")}
+              />
               <Info className="h-3 w-3" />
               <span>Analysis Prompt</span>
             </button>
-            
+
             {isExpanded && (
               <div className="rounded-lg border bg-muted/30 p-3 ml-4">
-                <p className="text-sm text-foreground/90">
-                  {prompt}
-                </p>
+                <p className="text-sm text-foreground/90">{prompt}</p>
               </div>
             )}
           </div>
         )}
       </div>
-      
+
       {/* Results */}
       {isLoading ? (
         <div className="rounded-lg border bg-background/50 backdrop-blur-sm overflow-hidden">
@@ -2464,13 +2634,15 @@ export const WebFetchWidget: React.FC<{
                   </button>
                 )}
               </div>
-              
+
               {/* Fetched Content */}
               <div className="relative">
-                <div className={cn(
-                  "rounded-lg bg-muted/30 p-3 overflow-hidden",
-                  !showFullContent && isTruncated && "max-h-[300px]"
-                )}>
+                <div
+                  className={cn(
+                    "rounded-lg bg-muted/30 p-3 overflow-hidden",
+                    !showFullContent && isTruncated && "max-h-[300px]"
+                  )}
+                >
                   <pre className="text-sm font-mono text-foreground/90 whitespace-pre-wrap">
                     {previewContent}
                   </pre>
@@ -2499,18 +2671,21 @@ export const WebFetchWidget: React.FC<{
 /**
  * Widget for TodoRead tool - displays todos with advanced viewing capabilities
  */
-export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todos: inputTodos, result }) => {
+export const TodoReadWidget: React.FC<{ todos?: TodoItem[]; result?: unknown }> = ({
+  todos: inputTodos,
+  result,
+}) => {
   // Extract todos from result if not directly provided
-  let todos: any[] = inputTodos || [];
+  let todos: TodoItem[] = inputTodos || [];
   if (!todos.length && result) {
-    if (typeof result === 'object' && Array.isArray(result.todos)) {
-      todos = result.todos;
-    } else if (typeof result.content === 'string') {
+    if (typeof result === "object" && Array.isArray((result as ToolResult).todos)) {
+      todos = (result as ToolResult).todos || [];
+    } else if (typeof (result as ToolResult).content === "string") {
       try {
-        const parsed = JSON.parse(result.content);
-        if (Array.isArray(parsed)) todos = parsed;
-        else if (parsed.todos) todos = parsed.todos;
-      } catch (e) {
+        const parsed = JSON.parse((result as ToolResult).content as string);
+        if (Array.isArray(parsed)) todos = parsed as TodoItem[];
+        else if (parsed.todos) todos = parsed.todos as TodoItem[];
+      } catch (_e) {
         // Not JSON, ignore
       }
     }
@@ -2528,65 +2703,67 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
       color: "text-green-500",
       bgColor: "bg-green-500/10",
       borderColor: "border-green-500/20",
-      label: "Completed"
+      label: "Completed",
     },
     in_progress: {
       icon: <Clock className="h-4 w-4 animate-pulse" />,
       color: "text-blue-500",
       bgColor: "bg-blue-500/10",
       borderColor: "border-blue-500/20",
-      label: "In Progress"
+      label: "In Progress",
     },
     pending: {
       icon: <Circle className="h-4 w-4" />,
       color: "text-muted-foreground",
       bgColor: "bg-muted/50",
       borderColor: "border-muted",
-      label: "Pending"
+      label: "Pending",
     },
     cancelled: {
       icon: <X className="h-4 w-4" />,
       color: "text-red-500",
       bgColor: "bg-red-500/10",
       borderColor: "border-red-500/20",
-      label: "Cancelled"
-    }
+      label: "Cancelled",
+    },
   };
 
   // Filter todos based on search and status
-  const filteredTodos = todos.filter(todo => {
-    const matchesSearch = !searchQuery || 
-      todo.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+  const filteredTodos = todos.filter((todo) => {
+    const matchesSearch =
+      !searchQuery ||
+      (todo.content && todo.content.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (todo.id && todo.id.toLowerCase().includes(searchQuery.toLowerCase()));
-    
+
     const matchesStatus = statusFilter === "all" || todo.status === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
 
   // Calculate statistics
   const stats = {
     total: todos.length,
-    completed: todos.filter(t => t.status === "completed").length,
-    inProgress: todos.filter(t => t.status === "in_progress").length,
-    pending: todos.filter(t => t.status === "pending").length,
-    cancelled: todos.filter(t => t.status === "cancelled").length,
-    completionRate: todos.length > 0 
-      ? Math.round((todos.filter(t => t.status === "completed").length / todos.length) * 100)
-      : 0
+    completed: todos.filter((t) => t.status === "completed").length,
+    inProgress: todos.filter((t) => t.status === "in_progress").length,
+    pending: todos.filter((t) => t.status === "pending").length,
+    cancelled: todos.filter((t) => t.status === "cancelled").length,
+    completionRate:
+      todos.length > 0
+        ? Math.round((todos.filter((t) => t.status === "completed").length / todos.length) * 100)
+        : 0,
   };
 
   // Group todos by status for board view
   const todosByStatus = {
-    pending: filteredTodos.filter(t => t.status === "pending"),
-    in_progress: filteredTodos.filter(t => t.status === "in_progress"),
-    completed: filteredTodos.filter(t => t.status === "completed"),
-    cancelled: filteredTodos.filter(t => t.status === "cancelled")
+    pending: filteredTodos.filter((t) => t.status === "pending"),
+    in_progress: filteredTodos.filter((t) => t.status === "in_progress"),
+    completed: filteredTodos.filter((t) => t.status === "completed"),
+    cancelled: filteredTodos.filter((t) => t.status === "cancelled"),
   };
 
   // Toggle expanded state for a todo
   const toggleExpanded = (todoId: string) => {
-    setExpandedTodos(prev => {
+    setExpandedTodos((prev) => {
       const next = new Set(prev);
       if (next.has(todoId)) {
         next.delete(todoId);
@@ -2600,11 +2777,11 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
   // Export todos as JSON
   const exportAsJson = () => {
     const dataStr = JSON.stringify(todos, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    const exportFileDefaultName = 'todos.json';
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
+    const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`;
+    const exportFileDefaultName = "todos.json";
+    const linkElement = document.createElement("a");
+    linkElement.setAttribute("href", dataUri);
+    linkElement.setAttribute("download", exportFileDefaultName);
     linkElement.click();
   };
 
@@ -2612,34 +2789,34 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
   const exportAsMarkdown = () => {
     let markdown = "# Todo List\n\n";
     markdown += `**Total**: ${stats.total} | **Completed**: ${stats.completed} | **In Progress**: ${stats.inProgress} | **Pending**: ${stats.pending}\n\n`;
-    
+
     const statusGroups = ["pending", "in_progress", "completed", "cancelled"];
-    statusGroups.forEach(status => {
-      const todosInStatus = todos.filter(t => t.status === status);
+    statusGroups.forEach((status) => {
+      const todosInStatus = todos.filter((t) => t.status === status);
       if (todosInStatus.length > 0) {
         markdown += `## ${statusConfig[status as keyof typeof statusConfig]?.label || status}\n\n`;
-        todosInStatus.forEach(todo => {
+        todosInStatus.forEach((todo) => {
           const checkbox = todo.status === "completed" ? "[x]" : "[ ]";
           markdown += `- ${checkbox} ${todo.content}${todo.id ? ` (${todo.id})` : ""}\n`;
-          if (todo.dependencies?.length > 0) {
+          if (todo.dependencies && todo.dependencies.length > 0) {
             markdown += `  - Dependencies: ${todo.dependencies.join(", ")}\n`;
           }
         });
         markdown += "\n";
       }
     });
-    
-    const dataUri = 'data:text/markdown;charset=utf-8,'+ encodeURIComponent(markdown);
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', 'todos.md');
+
+    const dataUri = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
+    const linkElement = document.createElement("a");
+    linkElement.setAttribute("href", dataUri);
+    linkElement.setAttribute("download", "todos.md");
     linkElement.click();
   };
 
   // Render todo card
-  const TodoCard = ({ todo, isExpanded }: { todo: any; isExpanded: boolean }) => {
+  const TodoCard = ({ todo, isExpanded }: { todo: TodoItem; isExpanded: boolean }) => {
     const config = statusConfig[todo.status as keyof typeof statusConfig] || statusConfig.pending;
-    
+
     return (
       <motion.div
         layout
@@ -2655,17 +2832,12 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
         onClick={() => todo.id && toggleExpanded(todo.id)}
       >
         <div className="flex items-start gap-3">
-          <div className={cn("mt-0.5", config.color)}>
-            {config.icon}
-          </div>
+          <div className={cn("mt-0.5", config.color)}>{config.icon}</div>
           <div className="flex-1 space-y-2">
-            <p className={cn(
-              "text-sm",
-              todo.status === "completed" && "line-through"
-            )}>
+            <p className={cn("text-sm", todo.status === "completed" && "line-through")}>
               {todo.content}
             </p>
-            
+
             {/* Todo metadata */}
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {todo.id && (
@@ -2674,17 +2846,17 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
                   <span className="font-mono">{todo.id}</span>
                 </div>
               )}
-              {todo.dependencies?.length > 0 && (
+              {todo.dependencies && todo.dependencies.length > 0 && (
                 <div className="flex items-center gap-1">
                   <GitBranch className="h-3 w-3" />
                   <span>{todo.dependencies.length} deps</span>
                 </div>
               )}
             </div>
-            
+
             {/* Expanded details */}
             <AnimatePresence>
-              {isExpanded && todo.dependencies?.length > 0 && (
+              {isExpanded && todo.dependencies && todo.dependencies.length > 0 && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
@@ -2695,11 +2867,7 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
                     <span className="text-xs font-medium text-muted-foreground">Dependencies:</span>
                     <div className="flex flex-wrap gap-1">
                       {todo.dependencies.map((dep: string) => (
-                        <Badge
-                          key={dep}
-                          variant="outline"
-                          className="text-xs font-mono"
-                        >
+                        <Badge key={dep} variant="outline" className="text-xs font-mono">
                           {dep}
                         </Badge>
                       ))}
@@ -2738,7 +2906,7 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
         {Object.entries(statusConfig).map(([status, config]) => {
           const count = stats[status as keyof typeof stats] || 0;
           const percentage = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
-          
+
           return (
             <Card key={status} className={cn("p-4", config.bgColor)}>
               <div className="flex items-center gap-3">
@@ -2764,7 +2932,7 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
           {Object.entries(statusConfig).map(([status, config]) => {
             const count = stats[status as keyof typeof stats] || 0;
             const percentage = stats.total > 0 ? (count / stats.total) * 100 : 0;
-            
+
             return (
               <div key={status} className="flex items-center gap-3">
                 <span className="text-xs w-20 text-right">{config.label}</span>
@@ -2790,7 +2958,7 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       {Object.entries(todosByStatus).map(([status, todos]) => {
         const config = statusConfig[status as keyof typeof statusConfig];
-        
+
         return (
           <div key={status} className="space-y-3">
             <div className="flex items-center gap-2 pb-2 border-b">
@@ -2801,17 +2969,15 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
               </Badge>
             </div>
             <div className="space-y-2">
-              {todos.map(todo => (
-                <TodoCard 
-                  key={todo.id || todos.indexOf(todo)} 
-                  todo={todo} 
-                  isExpanded={expandedTodos.has(todo.id)}
+              {todos.map((todo) => (
+                <TodoCard
+                  key={todo.id || todos.indexOf(todo)}
+                  todo={todo}
+                  isExpanded={todo.id ? expandedTodos.has(todo.id) : false}
                 />
               ))}
               {todos.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-4">
-                  No todos
-                </p>
+                <p className="text-xs text-muted-foreground text-center py-4">No todos</p>
               )}
             </div>
           </div>
@@ -2823,48 +2989,47 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
   // Render timeline view
   const TimelineView = () => {
     // Group todos by their dependencies to create a timeline
-    const rootTodos = todos.filter(t => !t.dependencies || t.dependencies.length === 0);
+    const rootTodos = todos.filter((t) => !t.dependencies || t.dependencies.length === 0);
     const rendered = new Set<string>();
-    
-    const renderTodoWithDependents = (todo: any, level = 0) => {
-      if (rendered.has(todo.id)) return null;
+
+    const renderTodoWithDependents = (todo: TodoItem, level = 0) => {
+      if (!todo.id || rendered.has(todo.id)) return null;
       rendered.add(todo.id);
-      
-      const dependents = todos.filter(t => 
-        t.dependencies?.includes(todo.id) && !rendered.has(t.id)
+
+      const dependents = todos.filter(
+        (t) => todo.id && t.dependencies?.includes(todo.id) && t.id && !rendered.has(t.id)
       );
-      
+
       return (
         <div key={todo.id} className="relative">
-          {level > 0 && (
-            <div className="absolute left-6 top-0 w-px h-6 bg-border" />
-          )}
+          {level > 0 && <div className="absolute left-6 top-0 w-px h-6 bg-border" />}
           <div className={cn("flex gap-4", level > 0 && "ml-12")}>
             <div className="relative">
-              <div className={cn(
-                "w-3 h-3 rounded-full border-2 bg-background",
-                statusConfig[todo.status as keyof typeof statusConfig]?.borderColor
-              )} />
+              <div
+                className={cn(
+                  "w-3 h-3 rounded-full border-2 bg-background",
+                  statusConfig[todo.status as keyof typeof statusConfig]?.borderColor
+                )}
+              />
               {dependents.length > 0 && (
                 <div className="absolute left-1/2 top-3 w-px h-full bg-border -translate-x-1/2" />
               )}
             </div>
             <div className="flex-1 pb-6">
-              <TodoCard 
-                todo={todo} 
-                isExpanded={expandedTodos.has(todo.id)}
-              />
+              <TodoCard todo={todo} isExpanded={todo.id ? expandedTodos.has(todo.id) : false} />
             </div>
           </div>
-          {dependents.map(dep => renderTodoWithDependents(dep, level + 1))}
+          {dependents.map((dep) => renderTodoWithDependents(dep, level + 1))}
         </div>
       );
     };
-    
+
     return (
       <div className="space-y-4">
-        {rootTodos.map(todo => renderTodoWithDependents(todo))}
-        {todos.filter(t => !rendered.has(t.id)).map(todo => renderTodoWithDependents(todo))}
+        {rootTodos.map((todo) => renderTodoWithDependents(todo))}
+        {todos
+          .filter((t) => t.id && !rendered.has(t.id))
+          .map((todo) => renderTodoWithDependents(todo))}
       </div>
     );
   };
@@ -2878,28 +3043,18 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
           <div>
             <h3 className="text-sm font-medium">Todo Overview</h3>
             <p className="text-xs text-muted-foreground">
-              {stats.total} total • {stats.completed} completed • {stats.completionRate}% done
+              {stats.total} total �?{stats.completed} completed �?{stats.completionRate}% done
             </p>
           </div>
         </div>
-        
+
         {/* Export Options */}
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={exportAsJson}
-          >
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={exportAsJson}>
             <Download className="h-3 w-3 mr-1" />
             JSON
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={exportAsMarkdown}
-          >
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={exportAsMarkdown}>
             <Download className="h-3 w-3 mr-1" />
             Markdown
           </Button>
@@ -2918,10 +3073,10 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
             className="pl-9 h-9"
           />
         </div>
-        
+
         <div className="flex gap-2">
           <div className="flex gap-1 p-1 bg-muted rounded-md">
-            {["all", "pending", "in_progress", "completed", "cancelled"].map(status => (
+            {["all", "pending", "in_progress", "completed", "cancelled"].map((status) => (
               <Button
                 key={status}
                 size="sm"
@@ -2929,7 +3084,9 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
                 className="h-7 px-2 text-xs"
                 onClick={() => setStatusFilter(status)}
               >
-                {status === "all" ? "All" : statusConfig[status as keyof typeof statusConfig]?.label}
+                {status === "all"
+                  ? "All"
+                  : statusConfig[status as keyof typeof statusConfig]?.label}
                 {status === "all" && (
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
                     {stats.total}
@@ -2965,18 +3122,18 @@ export const TodoReadWidget: React.FC<{ todos?: any[]; result?: any }> = ({ todo
         <TabsContent value="list" className="mt-4">
           <div className="space-y-2">
             <AnimatePresence mode="popLayout">
-              {filteredTodos.map(todo => (
-                <TodoCard 
-                  key={todo.id || filteredTodos.indexOf(todo)} 
-                  todo={todo} 
-                  isExpanded={expandedTodos.has(todo.id)}
+              {filteredTodos.map((todo) => (
+                <TodoCard
+                  key={todo.id || filteredTodos.indexOf(todo)}
+                  todo={todo}
+                  isExpanded={todo.id ? expandedTodos.has(todo.id) : false}
                 />
               ))}
             </AnimatePresence>
             {filteredTodos.length === 0 && (
               <div className="text-center py-8 text-sm text-muted-foreground">
-                {searchQuery || statusFilter !== "all" 
-                  ? "No todos match your filters" 
+                {searchQuery || statusFilter !== "all"
+                  ? "No todos match your filters"
                   : "No todos available"}
               </div>
             )}
