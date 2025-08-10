@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { api, type ProcessInfo, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatISOTimestamp } from "@/lib/date-utils";
-
+import { handleError } from "@/lib/errorHandler";
+/**
+ * Props interface for the RunningClaudeSessions component
+ */
 interface RunningClaudeSessionsProps {
   /**
    * Callback when a running session is clicked to resume
@@ -31,44 +34,64 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
 
   useEffect(() => {
     loadRunningSessions();
+
+    // Poll for updates every 3 seconds (more frequent to catch session changes)
+    const interval = window.setInterval(loadRunningSessions, 3000);
     
-    // Poll for updates every 5 seconds
-    const interval = setInterval(loadRunningSessions, 5000);
-    return () => clearInterval(interval);
+    // Listen for tab cleanup events to immediately refresh the list
+    const handleTabCleanup = () => {
+      // Small delay to allow backend to process the cancellation
+      setTimeout(loadRunningSessions, 500);
+    };
+    
+    window.addEventListener("tab-cleanup", handleTabCleanup);
+    
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("tab-cleanup", handleTabCleanup);
+    };
   }, []);
 
+  /**
+   * Load running Claude sessions from the API
+   */
   const loadRunningSessions = async () => {
     try {
       const sessions = await api.listRunningClaudeSessions();
-      setRunningSessions(sessions);
+      setRunningSessions(sessions as ProcessInfo[]);
       setError(null);
     } catch (err) {
-      console.error("Failed to load running sessions:", err);
+      await handleError("Failed to load running sessions:", { context: err });
       setError("Failed to load running sessions");
     } finally {
       setLoading(false);
     }
   };
 
+  /**
+   * Handle resuming a running Claude session
+   *
+   * @param processInfo - Process information for the session to resume
+   */
   const handleResumeSession = (processInfo: ProcessInfo) => {
     // Extract session ID from process type
-    if ('ClaudeSession' in processInfo.process_type) {
+    if ("ClaudeSession" in processInfo.process_type) {
       const sessionId = processInfo.process_type.ClaudeSession.session_id;
-      
+
       // Create a minimal session object for resumption
       const session: Session = {
         id: sessionId,
-        project_id: processInfo.project_path.replace(/[^a-zA-Z0-9]/g, '-'),
+        project_id: processInfo.project_path.replace(/[^a-zA-Z0-9]/g, "-"),
         project_path: processInfo.project_path,
         created_at: new Date(processInfo.started_at).getTime() / 1000,
       };
-      
+
       // Emit event to navigate to the session
-      const event = new CustomEvent('claude-session-selected', { 
-        detail: { session, projectPath: processInfo.project_path } 
+      const event = new window.CustomEvent("claude-session-selected", {
+        detail: { session, projectPath: processInfo.project_path },
       });
       window.dispatchEvent(event);
-      
+
       onSessionClick?.(session);
     }
   };
@@ -101,17 +124,16 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
           <h3 className="text-sm font-medium">Active Claude Sessions</h3>
         </div>
-        <span className="text-xs text-muted-foreground">
-          ({runningSessions.length} running)
-        </span>
+        <span className="text-xs text-muted-foreground">({runningSessions.length} running)</span>
       </div>
 
       <div className="space-y-2">
         {runningSessions.map((session) => {
-          const sessionId = 'ClaudeSession' in session.process_type 
-            ? session.process_type.ClaudeSession.session_id 
-            : null;
-          
+          const sessionId =
+            "ClaudeSession" in session.process_type
+              ? session.process_type.ClaudeSession.session_id
+              : null;
+
           if (!sessionId) return null;
 
           return (
@@ -122,10 +144,7 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
               transition={{ duration: 0.2 }}
             >
               <Card className="transition-all hover:shadow-md hover:scale-[1.01] cursor-pointer">
-                <CardContent 
-                  className="p-3"
-                  onClick={() => handleResumeSession(session)}
-                >
+                <CardContent className="p-3" onClick={() => handleResumeSession(session)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 flex-1 min-w-0">
                       <Terminal className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
@@ -134,15 +153,13 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
                           <p className="font-mono text-xs text-muted-foreground truncate">
                             {sessionId.substring(0, 20)}...
                           </p>
-                          <span className="text-xs text-green-600 font-medium">
-                            Running
-                          </span>
+                          <span className="text-xs text-green-600 font-medium">Running</span>
                         </div>
-                        
+
                         <p className="text-xs text-muted-foreground truncate">
                           {session.project_path}
                         </p>
-                        
+
                         <div className="flex items-center gap-3 text-xs text-muted-foreground">
                           <span>Started: {formatISOTimestamp(session.started_at)}</span>
                           <span>Model: {session.model}</span>
@@ -154,12 +171,8 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
                         </div>
                       </div>
                     </div>
-                    
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="flex-shrink-0"
-                    >
+
+                    <Button size="sm" variant="ghost" className="flex-shrink-0">
                       <Play className="h-3 w-3 mr-1" />
                       Resume
                     </Button>
@@ -172,4 +185,4 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
       </div>
     </div>
   );
-}; 
+};

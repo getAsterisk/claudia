@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { X, Plus, MessageSquare, Bot, AlertCircle, Loader2, Folder, BarChart, Server, Settings, FileText } from 'lucide-react';
 import { useTabState } from '@/hooks/useTabState';
-import { Tab, useTabContext } from '@/contexts/TabContext';
+import { Tab } from '@/contexts/contexts';
+import { useTabContext } from '@/hooks';
 import { cn } from '@/lib/utils';
 import { useTrackEvent } from '@/hooks';
 
@@ -17,29 +18,29 @@ interface TabItemProps {
 
 const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDragging = false, setDraggedTabId }) => {
   const [isHovered, setIsHovered] = useState(false);
-  
+
   const getIcon = () => {
     switch (tab.type) {
-      case 'chat':
+      case "chat":
         return MessageSquare;
-      case 'agent':
+      case "agent":
         return Bot;
-      case 'projects':
+      case "projects":
         return Folder;
-      case 'usage':
+      case "usage":
         return BarChart;
-      case 'mcp':
+      case "mcp":
         return Server;
-      case 'settings':
+      case "settings":
         return Settings;
-      case 'claude-md':
-      case 'claude-file':
+      case "claude-md":
+      case "claude-file":
         return FileText;
-      case 'agent-execution':
+      case "agent-execution":
         return Bot;
-      case 'create-agent':
+      case "create-agent":
         return Plus;
-      case 'import-agent':
+      case "import-agent":
         return Plus;
       default:
         return MessageSquare;
@@ -48,9 +49,9 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
 
   const getStatusIcon = () => {
     switch (tab.status) {
-      case 'running':
+      case "running":
         return <Loader2 className="w-3 h-3 animate-spin" />;
-      case 'error':
+      case "error":
         return <AlertCircle className="w-3 h-3 text-red-500" />;
       default:
         return null;
@@ -86,7 +87,7 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
       <div className="flex-shrink-0">
         <Icon className="w-4 h-4" />
       </div>
-      
+
       {/* Tab Title */}
       <span className="flex-1 truncate text-xs font-medium min-w-0">
         {tab.title}
@@ -101,7 +102,7 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
         )}
 
         {tab.hasUnsavedChanges && !statusIcon && (
-          <span 
+          <span
             className="w-1.5 h-1.5 bg-primary rounded-full"
             title="Unsaved changes"
           />
@@ -130,20 +131,38 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
   );
 };
 
+/**
+ * Props for the TabManager component
+ */
 interface TabManagerProps {
   className?: string;
 }
 
-export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
-  const {
-    tabs,
-    activeTabId,
-    createChatTab,
-    createProjectsTab,
-    closeTab,
-    switchToTab,
-    canAddTab
-  } = useTabState();
+export /**
+ * TabManager component for managing multiple application tabs
+ *
+ * Provides a complete tab interface with drag-and-drop reordering,
+ * tab creation, closing, and content rendering. Supports different
+ * tab types including chat, agent, projects, and settings.
+ *
+ * @param children - Tab content to render
+ * @param className - Optional CSS class name
+ * @param onTabChange - Callback when active tab changes
+ * @param maxTabs - Maximum number of tabs allowed
+ *
+ * @example
+ * ```tsx
+ * <TabManager
+ *   onTabChange={(tabId) => console.log('Active tab:', tabId)}
+ *   maxTabs={10}
+ * >
+ *   <TabContent />
+ * </TabManager>
+ * ```
+ */
+const TabManager: React.FC<TabManagerProps> = ({ className }) => {
+  const { tabs, activeTabId, createChatTab, createProjectsTab, closeTab, switchToTab, canAddTab } =
+    useTabState();
 
   // Access reorderTabs from context
   const { reorderTabs } = useTabContext();
@@ -152,20 +171,20 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
-  
+
   // Analytics tracking
   const trackEvent = useTrackEvent();
 
   // Listen for tab switch events
   useEffect(() => {
-    const handleSwitchToTab = (event: CustomEvent) => {
-      const { tabId } = event.detail;
+    const handleSwitchToTab = (event: Event) => {
+      const { tabId } = (event as CustomEvent).detail;
       switchToTab(tabId);
     };
 
-    window.addEventListener('switch-to-tab', handleSwitchToTab as EventListener);
+    window.addEventListener("switch-to-tab", handleSwitchToTab as EventListener);
     return () => {
-      window.removeEventListener('switch-to-tab', handleSwitchToTab as EventListener);
+      window.removeEventListener("switch-to-tab", handleSwitchToTab as EventListener);
     };
   }, [switchToTab]);
 
@@ -187,7 +206,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
     };
 
     const handleNextTab = () => {
-      const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+      const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
       const nextIndex = (currentIndex + 1) % tabs.length;
       if (tabs[nextIndex]) {
         switchToTab(tabs[nextIndex].id);
@@ -195,32 +214,32 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
     };
 
     const handlePreviousTab = () => {
-      const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+      const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
       const previousIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
       if (tabs[previousIndex]) {
         switchToTab(tabs[previousIndex].id);
       }
     };
 
-    const handleTabByIndex = (event: CustomEvent) => {
-      const { index } = event.detail;
+    const handleTabByIndex = (event: Event) => {
+      const { index } = (event as CustomEvent).detail;
       if (tabs[index]) {
         switchToTab(tabs[index].id);
       }
     };
 
-    window.addEventListener('create-chat-tab', handleCreateTab);
-    window.addEventListener('close-current-tab', handleCloseTab);
-    window.addEventListener('switch-to-next-tab', handleNextTab);
-    window.addEventListener('switch-to-previous-tab', handlePreviousTab);
-    window.addEventListener('switch-to-tab-by-index', handleTabByIndex as EventListener);
+    window.addEventListener("create-chat-tab", handleCreateTab);
+    window.addEventListener("close-current-tab", handleCloseTab);
+    window.addEventListener("switch-to-next-tab", handleNextTab);
+    window.addEventListener("switch-to-previous-tab", handlePreviousTab);
+    window.addEventListener("switch-to-tab-by-index", handleTabByIndex as EventListener);
 
     return () => {
-      window.removeEventListener('create-chat-tab', handleCreateTab);
-      window.removeEventListener('close-current-tab', handleCloseTab);
-      window.removeEventListener('switch-to-next-tab', handleNextTab);
-      window.removeEventListener('switch-to-previous-tab', handlePreviousTab);
-      window.removeEventListener('switch-to-tab-by-index', handleTabByIndex as EventListener);
+      window.removeEventListener("create-chat-tab", handleCreateTab);
+      window.removeEventListener("close-current-tab", handleCloseTab);
+      window.removeEventListener("switch-to-next-tab", handleNextTab);
+      window.removeEventListener("switch-to-previous-tab", handlePreviousTab);
+      window.removeEventListener("switch-to-tab-by-index", handleTabByIndex as EventListener);
     };
   }, [tabs, activeTabId, createChatTab, closeTab, switchToTab]);
 
@@ -239,12 +258,12 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    container.addEventListener('scroll', checkScrollButtons);
-    window.addEventListener('resize', checkScrollButtons);
+    container.addEventListener("scroll", checkScrollButtons);
+    window.addEventListener("resize", checkScrollButtons);
 
     return () => {
-      container.removeEventListener('scroll', checkScrollButtons);
-      window.removeEventListener('resize', checkScrollButtons);
+      container.removeEventListener("scroll", checkScrollButtons);
+      window.removeEventListener("resize", checkScrollButtons);
     };
   }, [tabs]);
 
@@ -252,21 +271,21 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
     // Find the positions that changed
     const oldOrder = tabs.map(tab => tab.id);
     const newOrderIds = newOrder.map(tab => tab.id);
-    
+
     // Find what moved
     const movedTabId = newOrderIds.find((id, index) => oldOrder[index] !== id);
     if (!movedTabId) return;
-    
+
     const oldIndex = oldOrder.indexOf(movedTabId);
     const newIndex = newOrderIds.indexOf(movedTabId);
-    
+
     if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
       // Use the context's reorderTabs function
       reorderTabs(oldIndex, newIndex);
       // Track the reorder event
-      trackEvent.featureUsed?.('tab_reorder', 'drag_drop', { 
-        from_index: oldIndex, 
-        to_index: newIndex 
+      trackEvent.featureUsed?.('tab_reorder', 'drag_drop', {
+        from_index: oldIndex,
+        to_index: newIndex
       });
     }
   };
@@ -286,18 +305,19 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
     }
   };
 
-  const scrollTabs = (direction: 'left' | 'right') => {
+  const scrollTabs = (direction: "left" | "right") => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
     const scrollAmount = 200;
-    const newScrollLeft = direction === 'left'
-      ? container.scrollLeft - scrollAmount
-      : container.scrollLeft + scrollAmount;
+    const newScrollLeft =
+      direction === "left"
+        ? container.scrollLeft - scrollAmount
+        : container.scrollLeft + scrollAmount;
 
     container.scrollTo({
       left: newScrollLeft,
-      behavior: 'smooth'
+      behavior: "smooth",
     });
   };
 
@@ -307,7 +327,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
       {showLeftScroll && (
         <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-muted/15 to-transparent pointer-events-none z-10" />
       )}
-      
+
       {/* Left scroll button */}
       <AnimatePresence>
         {showLeftScroll && (
@@ -334,7 +354,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
       <div
         ref={scrollContainerRef}
         className="flex-1 flex overflow-x-auto scrollbar-hide"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
         <Reorder.Group
           axis="x"

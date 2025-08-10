@@ -1,13 +1,40 @@
-import * as React from "react"
-import * as TooltipPrimitive from "@radix-ui/react-tooltip"
-import { cn } from "@/lib/utils"
+import * as React from "react";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { cn } from "@/lib/utils";
 
-const TooltipProvider = TooltipPrimitive.Provider
+/**
+ * TooltipProvider component - Provides context for tooltip components
+ *
+ * Wrap your app or a section of your app with this provider to enable tooltips.
+ *
+ * @example
+ * ```tsx
+ * <TooltipProvider>
+ *   <Tooltip>
+ *     <TooltipTrigger>Hover me</TooltipTrigger>
+ *     <TooltipContent>Tooltip content</TooltipContent>
+ *   </Tooltip>
+ * </TooltipProvider>
+ * ```
+ */
+const TooltipProvider = TooltipPrimitive.Provider;
 
-const Tooltip = TooltipPrimitive.Root
+/**
+ * Tooltip component - Root container for tooltip functionality
+ */
+const Tooltip = TooltipPrimitive.Root;
 
-const TooltipTrigger = TooltipPrimitive.Trigger
+/**
+ * TooltipTrigger component - Element that triggers the tooltip on hover/focus
+ */
+const TooltipTrigger = TooltipPrimitive.Trigger;
 
+/**
+ * TooltipContent component - The content that appears in the tooltip
+ *
+ * @param className - Additional CSS classes
+ * @param sideOffset - Distance from the trigger element (default: 4px)
+ */
 const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
@@ -21,9 +48,7 @@ const TooltipContent = React.forwardRef<
     )}
     {...props}
   />
-))
-TooltipContent.displayName = TooltipPrimitive.Content.displayName
+));
+TooltipContent.displayName = TooltipPrimitive.Content.displayName;
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
-
- 
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };

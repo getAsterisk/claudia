@@ -3,12 +3,43 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Select component - Root container for select dropdown
+ *
+ * A dropdown select component built on top of Radix UI Select primitive.
+ * Provides accessible keyboard navigation and customizable styling.
+ *
+ * @example
+ * ```tsx
+ * <Select value={value} onValueChange={setValue}>
+ *   <SelectTrigger>
+ *     <SelectValue placeholder="Select an option..." />
+ *   </SelectTrigger>
+ *   <SelectContent>
+ *     <SelectItem value="option1">Option 1</SelectItem>
+ *     <SelectItem value="option2">Option 2</SelectItem>
+ *   </SelectContent>
+ * </Select>
+ * ```
+ */
 const Select = SelectPrimitive.Root;
 
+/**
+ * SelectGroup component - Groups related select items together
+ */
 const SelectGroup = SelectPrimitive.Group;
 
+/**
+ * SelectValue component - Displays the selected value or placeholder
+ */
 const SelectValue = SelectPrimitive.Value;
 
+/**
+ * SelectTrigger component - Button that opens the select dropdown
+ *
+ * @param className - Additional CSS classes
+ * @param children - Trigger content (usually SelectValue)
+ */
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
@@ -35,10 +66,7 @@ const SelectScrollUpButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollUpButton
     ref={ref}
-    className={cn(
-      "flex cursor-default items-center justify-center py-1",
-      className
-    )}
+    className={cn("flex cursor-default items-center justify-center py-1", className)}
     {...props}
   >
     <ChevronUp className="h-4 w-4" />
@@ -52,10 +80,7 @@ const SelectScrollDownButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollDownButton
     ref={ref}
-    className={cn(
-      "flex cursor-default items-center justify-center py-1",
-      className
-    )}
+    className={cn("flex cursor-default items-center justify-center py-1", className)}
     {...props}
   >
     <ChevronDown className="h-4 w-4" />
@@ -176,7 +201,7 @@ export interface SelectProps {
 
 /**
  * Simple select dropdown component
- * 
+ *
  * @example
  * <Select
  *   value={selected}
@@ -223,4 +248,4 @@ export {
   SelectScrollUpButton,
   SelectScrollDownButton,
   SimpleSelect as SelectComponent,
-}; 
+};

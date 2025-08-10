@@ -16,7 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 
+/**
+ * Props interface for the WebviewPreview component
+ */
 interface WebviewPreviewProps {
   /**
    * Initial URL to load
@@ -46,12 +50,35 @@ interface WebviewPreviewProps {
 
 /**
  * WebviewPreview component - Browser-like webview with navigation controls
- * 
+ *
  * @example
  * <WebviewPreview
  *   initialUrl="http://localhost:3000"
  *   onClose={() => setShowPreview(false)}
  * />
+ */
+/**
+ * WebviewPreview component for displaying web content in an embedded browser
+ *
+ * A full-featured web browser component with navigation controls, URL bar,
+ * loading states, and error handling. Supports maximized/minimized modes
+ * and provides a complete browsing experience within the application.
+ *
+ * @param initialUrl - URL to load when component mounts
+ * @param onClose - Callback when the close button is clicked
+ * @param isMaximized - Whether the webview should start maximized
+ * @param onMaximizedChange - Callback when maximized state changes
+ * @param className - Additional CSS classes for styling
+ *
+ * @example
+ * ```tsx
+ * <WebviewPreview
+ *   initialUrl="https://example.com"
+ *   onClose={() => setShowWebview(false)}
+ *   isMaximized={isFullscreen}
+ *   onMaximizedChange={setIsFullscreen}
+ * />
+ * ```
  */
 const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
   initialUrl,
@@ -69,7 +96,7 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
   // TODO: These will be implemented with actual webview navigation
   // const [canGoBack, setCanGoBack] = useState(false);
   // const [canGoForward, setCanGoForward] = useState(false);
-  
+
   // TODO: These will be used for actual Tauri webview implementation
   // const webviewRef = useRef<WebviewWindow | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -80,19 +107,24 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
   // Handle ESC key to exit full screen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isMaximized && onToggleMaximize) {
+      if (e.key === "Escape" && isMaximized && onToggleMaximize) {
         onToggleMaximize();
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isMaximized, onToggleMaximize]);
 
   // Debug: Log initial URL on mount
   useEffect(() => {
-    console.log('[WebviewPreview] Component mounted with initialUrl:', initialUrl, 'isMaximized:', isMaximized);
-  }, []);
+    logger.debug(
+      "[WebviewPreview] Component mounted with initialUrl:",
+      initialUrl,
+      "isMaximized:",
+      isMaximized
+    );
+  }, [initialUrl, isMaximized]);
 
   // Focus management for full screen mode
   useEffect(() => {
@@ -109,7 +141,7 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
       // For now, using iframe for demonstration
       setIsLoading(true);
       setHasError(false);
-      
+
       // Simulate loading
       const timer = setTimeout(() => {
         setIsLoading(false);
@@ -122,20 +154,23 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
   const navigate = (url: string) => {
     try {
       // Validate URL
-      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      const urlObj = new URL(url.startsWith("http") ? url : `https://${url}`);
       const finalUrl = urlObj.href;
-      
-      console.log('[WebviewPreview] Navigating to:', finalUrl);
+
+      logger.debug("[WebviewPreview] Navigating to:", finalUrl);
       setCurrentUrl(finalUrl);
       setInputUrl(finalUrl);
       setHasError(false);
       onUrlChange?.(finalUrl);
-    } catch (err) {
+    } catch (_err) {
       setHasError(true);
       setErrorMessage("Invalid URL");
     }
   };
 
+  /**
+   * Handle navigation to the entered URL
+   */
   const handleNavigate = () => {
     if (inputUrl.trim()) {
       navigate(inputUrl);
@@ -143,33 +178,45 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       handleNavigate();
     }
   };
 
+  /**
+   * Handle navigating back in browser history
+   */
   const handleGoBack = () => {
     // In real implementation, this would call webview.goBack()
-    console.log("Go back");
+    logger.debug("Go back");
   };
 
+  /**
+   * Handle navigating forward in browser history
+   */
   const handleGoForward = () => {
     // In real implementation, this would call webview.goForward()
-    console.log("Go forward");
+    logger.debug("Go forward");
   };
 
+  /**
+   * Handle refreshing the current page
+   */
   const handleRefresh = () => {
     setIsLoading(true);
     // In real implementation, this would call webview.reload()
     setTimeout(() => setIsLoading(false), 1000);
   };
 
+  /**
+   * Handle navigating to home page
+   */
   const handleGoHome = () => {
     navigate(initialUrl);
   };
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={cn("flex flex-col h-full bg-background border-l", className)}
       tabIndex={-1}
@@ -183,11 +230,9 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">Preview</span>
-            {isLoading && (
-              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-            )}
+            {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
           </div>
-          
+
           <div className="flex items-center gap-1">
             {onToggleMaximize && (
               <TooltipProvider>
@@ -222,7 +267,7 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
             </Button>
           </div>
         </div>
-        
+
         {/* Navigation Bar */}
         <div className="flex items-center gap-2 px-3 py-2">
           {/* Navigation Buttons */}
@@ -254,16 +299,11 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
             >
               <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleGoHome}
-              className="h-8 w-8"
-            >
+            <Button variant="ghost" size="icon" onClick={handleGoHome} className="h-8 w-8">
               <Home className="h-4 w-4" />
             </Button>
           </div>
-          
+
           {/* URL Bar */}
           <div className="flex-1 relative">
             <Input
@@ -286,7 +326,7 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
           </div>
         </div>
       </div>
-      
+
       {/* Webview Content */}
       <div className="flex-1 relative bg-background" ref={contentRef}>
         {/* Loading Overlay */}
@@ -305,7 +345,7 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
-        
+
         {/* Error State */}
         {hasError ? (
           <div className="flex flex-col items-center justify-center h-full p-8">
@@ -342,7 +382,9 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
             </p>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>Try entering</span>
-              <code className="px-2 py-1 bg-muted/50 text-foreground rounded font-mono text-xs">localhost:3000</code>
+              <code className="px-2 py-1 bg-muted/50 text-foreground rounded font-mono text-xs">
+                localhost:3000
+              </code>
               <span>or any other URL</span>
             </div>
           </div>
@@ -352,4 +394,4 @@ const WebviewPreviewComponent: React.FC<WebviewPreviewProps> = ({
   );
 };
 
-export const WebviewPreview = React.memo(WebviewPreviewComponent); 
+export const WebviewPreview = React.memo(WebviewPreviewComponent);

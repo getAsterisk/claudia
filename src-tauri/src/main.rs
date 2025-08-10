@@ -4,21 +4,22 @@
 mod checkpoint;
 mod claude_binary;
 mod commands;
+mod logger;
 mod process;
 
 use checkpoint::state::CheckpointState;
 use commands::agents::{
-    cleanup_finished_processes, create_agent, delete_agent, execute_agent, export_agent,
+    cleanup_finished_processes, create_agent, delete_agent, delete_native_agents, execute_agent, export_agent,
     export_agent_to_file, fetch_github_agent_content, fetch_github_agents, get_agent,
-    get_agent_run, get_agent_run_with_real_time_metrics, get_claude_binary_path,
+    get_agent_run, get_agent_run_with_real_time_metrics, get_claude_binary_path, refresh_claude_binary_path,
     get_live_session_output, get_session_output, get_session_status, import_agent,
-    import_agent_from_file, import_agent_from_github, init_database, kill_agent_session,
+    import_agent_from_file, import_agent_from_github, import_native_agents, init_database, kill_agent_session,
     list_agent_runs, list_agent_runs_with_metrics, list_agents, list_claude_installations,
-    list_running_sessions, load_agent_session_history, set_claude_binary_path, stream_session_output, update_agent, AgentDb,
+    list_native_agents, list_running_sessions, load_agent_session_history, set_claude_binary_path, stream_session_output, update_agent, AgentDb,
 };
 use commands::claude::{
     cancel_claude_execution, check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
-    clear_checkpoint_manager, continue_claude_code, create_checkpoint, execute_claude_code,
+    clear_checkpoint_manager, continue_claude_code, create_checkpoint, delete_session, execute_claude_code,
     find_claude_md_files, fork_from_checkpoint, get_checkpoint_diff, get_checkpoint_settings,
     get_checkpoint_state_stats, get_claude_session_output, get_claude_settings, get_project_sessions,
     get_recently_modified_files, get_session_timeline, get_system_prompt, list_checkpoints,
@@ -47,18 +48,20 @@ use process::ProcessRegistryState;
 use std::sync::Mutex;
 use tauri::Manager;
 
-fn main() {
-    // Initialize logger
-    env_logger::init();
-
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize unified logger
+    logger::init_logger();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Initialize agents database
-            let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
-            
+            let conn = init_database(&app.handle()).map_err(|e| {
+                log::error!("Failed to initialize agents database: {}", e);
+                format!("Database initialization failed: {}", e)
+            })?;
+
             // Load and apply proxy settings from the database
             {
                 let db = AgentDb(Mutex::new(conn));
@@ -66,7 +69,7 @@ fn main() {
                     Ok(conn) => {
                         // Directly query proxy settings from the database
                         let mut settings = commands::proxy::ProxySettings::default();
-                        
+
                         let keys = vec![
                             ("proxy_enabled", "enabled"),
                             ("proxy_http", "http_proxy"),
@@ -74,7 +77,7 @@ fn main() {
                             ("proxy_no", "no_proxy"),
                             ("proxy_all", "all_proxy"),
                         ];
-                        
+
                         for (db_key, field) in keys {
                             if let Ok(value) = conn.query_row(
                                 "SELECT value FROM app_settings WHERE key = ?1",
@@ -91,7 +94,7 @@ fn main() {
                                 }
                             }
                         }
-                        
+
                         log::info!("Loaded proxy settings: enabled={}", settings.enabled);
                         settings
                     }
@@ -100,13 +103,16 @@ fn main() {
                         commands::proxy::ProxySettings::default()
                     }
                 };
-                
+
                 // Apply the proxy settings
                 apply_proxy_settings(&proxy_settings);
             }
-            
+
             // Re-open the connection for the app to manage
-            let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
+            let conn = init_database(&app.handle()).map_err(|e| {
+                log::error!("Failed to re-initialize agents database: {}", e);
+                format!("Database re-initialization failed: {}", e)
+            })?;
             app.manage(AgentDb(Mutex::new(conn)));
 
             // Initialize checkpoint state
@@ -161,10 +167,11 @@ fn main() {
             list_directory_contents,
             search_files,
             get_recently_modified_files,
+            delete_session,
             get_hooks_config,
             update_hooks_config,
             validate_hook_command,
-            
+
             // Checkpoint Management
             create_checkpoint,
             restore_checkpoint,
@@ -180,12 +187,15 @@ fn main() {
             get_checkpoint_settings,
             clear_checkpoint_manager,
             get_checkpoint_state_stats,
-            
+
             // Agent Management
             list_agents,
+            list_native_agents,
+            import_native_agents,
             create_agent,
             update_agent,
             delete_agent,
+            delete_native_agents,
             get_agent,
             execute_agent,
             list_agent_runs,
@@ -202,6 +212,7 @@ fn main() {
             load_agent_session_history,
             get_claude_binary_path,
             set_claude_binary_path,
+            refresh_claude_binary_path,
             list_claude_installations,
             export_agent,
             export_agent_to_file,
@@ -210,13 +221,13 @@ fn main() {
             fetch_github_agents,
             fetch_github_agent_content,
             import_agent_from_github,
-            
+
             // Usage & Analytics
             get_usage_stats,
             get_usage_by_date_range,
             get_usage_details,
             get_session_stats,
-            
+
             // MCP (Model Context Protocol)
             mcp_add,
             mcp_list,
@@ -230,7 +241,7 @@ fn main() {
             mcp_get_server_status,
             mcp_read_project_config,
             mcp_save_project_config,
-            
+
             // Storage Management
             storage_list_tables,
             storage_read_table,
@@ -239,17 +250,22 @@ fn main() {
             storage_insert_row,
             storage_execute_sql,
             storage_reset_database,
-            
+
             // Slash Commands
             commands::slash_commands::slash_commands_list,
             commands::slash_commands::slash_command_get,
             commands::slash_commands::slash_command_save,
             commands::slash_commands::slash_command_delete,
-            
+
             // Proxy Settings
             get_proxy_settings,
             save_proxy_settings,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .map_err(|e| {
+            log::error!("Failed to run Tauri application: {}", e);
+            e
+        })?;
+
+    Ok(())
 }

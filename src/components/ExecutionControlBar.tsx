@@ -4,6 +4,9 @@ import { StopCircle, Clock, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+/**
+ * Props interface for the ExecutionControlBar component
+ */
 interface ExecutionControlBarProps {
   isExecuting: boolean;
   onStop: () => void;
@@ -14,14 +17,33 @@ interface ExecutionControlBarProps {
 
 /**
  * Floating control bar shown during agent execution
- * Provides stop functionality and real-time statistics
+ *
+ * A floating control bar that appears at the bottom of the screen during
+ * agent execution, providing real-time statistics and the ability to stop
+ * execution. Features smooth animations and responsive design.
+ *
+ * @param isExecuting - Whether agent execution is currently active
+ * @param onStop - Callback function to stop execution
+ * @param totalTokens - Total tokens consumed during execution (default: 0)
+ * @param elapsedTime - Elapsed time in seconds (default: 0)
+ * @param className - Additional CSS classes for styling
+ *
+ * @example
+ * ```tsx
+ * <ExecutionControlBar
+ *   isExecuting={isRunning}
+ *   onStop={() => stopExecution()}
+ *   totalTokens={1250}
+ *   elapsedTime={45}
+ * />
+ * ```
  */
-export const ExecutionControlBar: React.FC<ExecutionControlBarProps> = ({ 
-  isExecuting, 
-  onStop, 
+export const ExecutionControlBar: React.FC<ExecutionControlBarProps> = ({
+  isExecuting,
+  onStop,
   totalTokens = 0,
   elapsedTime = 0,
-  className 
+  className,
 }) => {
   // Format elapsed time
   const formatTime = (seconds: number) => {
@@ -86,12 +108,7 @@ export const ExecutionControlBar: React.FC<ExecutionControlBarProps> = ({
           <div className="h-4 w-px bg-border" />
 
           {/* Stop button */}
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={onStop}
-            className="gap-2"
-          >
+          <Button size="sm" variant="destructive" onClick={onStop} className="gap-2">
             <StopCircle className="h-3.5 w-3.5" />
             Stop
           </Button>
@@ -99,4 +116,4 @@ export const ExecutionControlBar: React.FC<ExecutionControlBarProps> = ({
       )}
     </AnimatePresence>
   );
-}; 
+};

@@ -8,10 +8,13 @@ import { Toast, ToastContainer } from "@/components/ui/toast";
 import { api, type Agent } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import MDEditor from "@uiw/react-md-editor";
-import { type AgentIconName } from "./CCAgents";
-import { IconPicker, ICON_MAP } from "./IconPicker";
-
-
+import { IconPicker } from "./IconPicker";
+import { AGENT_ICONS } from "@/constants/agentIcons";
+import { useI18n } from "@/lib/i18n";
+import { handleError } from "@/lib/errorHandler";
+/**
+ * Props interface for the CreateAgent component
+ */
 interface CreateAgentProps {
   /**
    * Optional agent to edit (if provided, component is in edit mode)
@@ -33,9 +36,40 @@ interface CreateAgentProps {
 
 /**
  * CreateAgent component for creating or editing a CC agent
- * 
+ *
  * @example
  * <CreateAgent onBack={() => setView('list')} onAgentCreated={handleCreated} />
+ */
+/**
+ * CreateAgent component for creating new Claude Code agents
+ *
+ * A comprehensive form interface for creating new agents with support for
+ * name, description, icon selection, prompt configuration, and validation.
+ * Features real-time validation and preview capabilities.
+ *
+ * @param agent - Optional agent to edit (if provided, component is in edit mode)
+ * @param onBack - Callback to return to the previous view
+ * @param onAgentCreated - Callback when an agent is successfully created
+ *
+ * @example
+ * ```tsx
+ * <CreateAgent
+ *   onBack={() => setView('agents')}
+ *   onAgentCreated={(agent) => {
+ *     console.log('Created agent:', agent.name);
+ *     setView('agents');
+ *   }}
+ * />
+ *
+ * // Edit mode
+ * <CreateAgent
+ *   agent={existingAgent}
+ *   onBack={() => setView('agents')}
+ *   onAgentCreated={(agent) => {
+ *     console.log('Updated agent:', agent.name);
+ *   }}
+ * />
+ * ```
  */
 export const CreateAgent: React.FC<CreateAgentProps> = ({
   agent,
@@ -43,11 +77,11 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
   onAgentCreated,
   className,
 }) => {
+  const { t } = useI18n();
   const [name, setName] = useState(agent?.name || "");
-  const [selectedIcon, setSelectedIcon] = useState<AgentIconName>((agent?.icon as AgentIconName) || "bot");
+  const [selectedIcon, setSelectedIcon] = useState<string>(agent?.icon || "bot");
   const [systemPrompt, setSystemPrompt] = useState(agent?.system_prompt || "");
   const [defaultTask, setDefaultTask] = useState(agent?.default_task || "");
-  const [model, setModel] = useState(agent?.model || "sonnet");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -57,45 +91,38 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
 
   const handleSave = async () => {
     if (!name.trim()) {
-      setError("Agent name is required");
+      setError(t.agents.agentNameRequired);
       return;
     }
 
     if (!systemPrompt.trim()) {
-      setError("System prompt is required");
+      setError(t.agents.systemPromptRequired);
       return;
     }
 
     try {
       setSaving(true);
       setError(null);
-      
+
       if (isEditMode && agent.id) {
         await api.updateAgent(
-          agent.id, 
-          name, 
-          selectedIcon, 
-          systemPrompt, 
-          defaultTask || undefined, 
-          model
+          agent.id,
+          name,
+          selectedIcon,
+          systemPrompt,
+          defaultTask || undefined
         );
       } else {
-        await api.createAgent(
-          name, 
-          selectedIcon, 
-          systemPrompt, 
-          defaultTask || undefined, 
-          model
-        );
+        await api.createAgent(name, selectedIcon, systemPrompt, defaultTask || undefined);
       }
-      
+
       onAgentCreated();
     } catch (err) {
-      console.error("Failed to save agent:", err);
-      setError(isEditMode ? "Failed to update agent" : "Failed to create agent");
-      setToast({ 
-        message: isEditMode ? "Failed to update agent" : "Failed to create agent", 
-        type: "error" 
+      await handleError("Failed to save agent:", { context: err });
+      setError(isEditMode ? t.agents.failedToUpdateAgent : t.agents.failedToCreateAgent);
+      setToast({
+        message: isEditMode ? t.agents.failedToUpdateAgent : t.agents.failedToCreateAgent,
+        type: "error",
       });
     } finally {
       setSaving(false);
@@ -103,12 +130,13 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
   };
 
   const handleBack = () => {
-    if ((name !== (agent?.name || "") || 
-         selectedIcon !== (agent?.icon || "bot") || 
-         systemPrompt !== (agent?.system_prompt || "") ||
-         defaultTask !== (agent?.default_task || "") ||
-         model !== (agent?.model || "sonnet")) && 
-        !confirm("You have unsaved changes. Are you sure you want to leave?")) {
+    if (
+      (name !== (agent?.name || "") ||
+        selectedIcon !== (agent?.icon || "bot") ||
+        systemPrompt !== (agent?.system_prompt || "") ||
+        defaultTask !== (agent?.default_task || "")) &&
+      !globalThis.confirm(t.agents.unsavedChanges)
+    ) {
       return;
     }
     onBack();
@@ -125,24 +153,19 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
           className="flex items-center justify-between p-4 border-b border-border"
         >
           <div className="flex items-center space-x-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="h-8 w-8"
-            >
+            <Button variant="ghost" size="icon" onClick={handleBack} className="h-8 w-8">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
               <h2 className="text-lg font-semibold">
-                {isEditMode ? "Edit CC Agent" : "Create CC Agent"}
+                {isEditMode ? t.agents.editCCAgent : t.agents.createCCAgent}
               </h2>
               <p className="text-xs text-muted-foreground">
-                {isEditMode ? "Update your Claude Code agent" : "Create a new Claude Code agent"}
+                {isEditMode ? t.agents.updateAgent : t.agents.createNewAgent}
               </p>
             </div>
           </div>
-          
+
           <Button
             onClick={handleSave}
             disabled={saving || !name.trim() || !systemPrompt.trim()}
@@ -153,10 +176,10 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
             ) : (
               <Save className="mr-2 h-4 w-4" />
             )}
-            {saving ? "Saving..." : "Save"}
+            {saving ? t.agents.saving : t.common.save}
           </Button>
         </motion.div>
-        
+
         {/* Error display */}
         {error && (
           <motion.div
@@ -167,7 +190,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
             {error}
           </motion.div>
         )}
-        
+
         {/* Form */}
         <div className="flex-1 overflow-y-auto px-4 py-6">
           <motion.div
@@ -176,34 +199,34 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
             transition={{ duration: 0.3, delay: 0.1 }}
             className="space-y-6"
           >
-                {/* Basic Information */}
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-sm font-medium mb-4">Basic Information</h3>
-                  </div>
-              
+            {/* Basic Information */}
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium mb-4">{t.agents.basicInformation}</h3>
+              </div>
+
               {/* Name and Icon */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Agent Name</Label>
+                  <Label htmlFor="name">{t.agents.agentName}</Label>
                   <Input
                     id="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g., Code Assistant"
+                    placeholder={t.agents.agentNamePlaceholder}
                     required
                   />
                 </div>
-                
+
                 <div className="space-y-2">
-                  <Label>Agent Icon</Label>
+                  <Label>{t.agents.agentIcon}</Label>
                   <div
                     onClick={() => setShowIconPicker(true)}
                     className="h-10 px-3 py-2 bg-background border border-input rounded-md cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors flex items-center justify-between"
                   >
                     <div className="flex items-center gap-2">
                       {(() => {
-                        const Icon = ICON_MAP[selectedIcon] || ICON_MAP.bot;
+                        const Icon = AGENT_ICONS[selectedIcon] || AGENT_ICONS.bot;
                         return (
                           <>
                             <Icon className="h-4 w-4" />
@@ -217,89 +240,29 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                 </div>
               </div>
 
-              {/* Model Selection */}
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setModel("sonnet")}
-                    className={cn(
-                      "flex-1 px-4 py-2.5 rounded-full border-2 font-medium transition-all",
-                      "hover:scale-[1.02] active:scale-[0.98]",
-                      model === "sonnet" 
-                        ? "border-primary bg-primary text-primary-foreground shadow-lg" 
-                        : "border-muted-foreground/30 hover:border-muted-foreground/50"
-                    )}
-                  >
-                    <div className="flex items-center justify-center gap-2.5">
-                      <div className={cn(
-                        "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
-                        model === "sonnet" ? "border-primary-foreground" : "border-current"
-                      )}>
-                        {model === "sonnet" && (
-                          <div className="w-2 h-2 rounded-full bg-primary-foreground" />
-                        )}
-                      </div>
-                      <div className="text-left">
-                        <div className="text-sm font-semibold">Claude 4 Sonnet</div>
-                        <div className="text-xs opacity-80">Faster, efficient for most tasks</div>
-                      </div>
-                    </div>
-                  </button>
-                  
-                  <button
-                    type="button"
-                    onClick={() => setModel("opus")}
-                    className={cn(
-                      "flex-1 px-4 py-2.5 rounded-full border-2 font-medium transition-all",
-                      "hover:scale-[1.02] active:scale-[0.98]",
-                      model === "opus" 
-                        ? "border-primary bg-primary text-primary-foreground shadow-lg" 
-                        : "border-muted-foreground/30 hover:border-muted-foreground/50"
-                    )}
-                  >
-                    <div className="flex items-center justify-center gap-2.5">
-                      <div className={cn(
-                        "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
-                        model === "opus" ? "border-primary-foreground" : "border-current"
-                      )}>
-                        {model === "opus" && (
-                          <div className="w-2 h-2 rounded-full bg-primary-foreground" />
-                        )}
-                      </div>
-                      <div className="text-left">
-                        <div className="text-sm font-semibold">Claude 4 Opus</div>
-                        <div className="text-xs opacity-80">More capable, better for complex tasks</div>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
 
               {/* Default Task */}
               <div className="space-y-2">
-                <Label htmlFor="default-task">Default Task (Optional)</Label>
+                <Label htmlFor="default-task">{t.agents.defaultTask}</Label>
                 <Input
                   id="default-task"
                   type="text"
-                  placeholder="e.g., Review this code for security issues"
+                  placeholder={t.agents.defaultTaskPlaceholder}
                   value={defaultTask}
                   onChange={(e) => setDefaultTask(e.target.value)}
                   className="max-w-md"
                 />
-                <p className="text-xs text-muted-foreground">
-                  This will be used as the default task placeholder when executing the agent
-                </p>
+                <p className="text-xs text-muted-foreground">{t.agents.defaultTaskDesc}</p>
               </div>
 
               {/* System Prompt Editor */}
               <div className="space-y-2">
-                <Label>System Prompt</Label>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Define the behavior and capabilities of your CC Agent
-                </p>
-                <div className="rounded-lg border border-border overflow-hidden shadow-sm" data-color-mode="dark">
+                <Label>{t.agents.systemPrompt}</Label>
+                <p className="text-xs text-muted-foreground mb-2">{t.agents.systemPromptDesc}</p>
+                <div
+                  className="rounded-lg border border-border overflow-hidden shadow-sm"
+                  data-color-mode="dark"
+                >
                   <MDEditor
                     value={systemPrompt}
                     onChange={(val) => setSystemPrompt(val || "")}
@@ -313,28 +276,24 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
           </motion.div>
         </div>
       </div>
-  
-  {/* Toast Notification */}
-  <ToastContainer>
-    {toast && (
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        onDismiss={() => setToast(null)}
-      />
-    )}
-  </ToastContainer>
 
-  {/* Icon Picker Dialog */}
-  <IconPicker
-    value={selectedIcon}
-    onSelect={(iconName) => {
-      setSelectedIcon(iconName as AgentIconName);
-      setShowIconPicker(false);
-    }}
-    isOpen={showIconPicker}
-    onClose={() => setShowIconPicker(false)}
-  />
-</div>
+      {/* Toast Notification */}
+      <ToastContainer>
+        {toast && (
+          <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />
+        )}
+      </ToastContainer>
+
+      {/* Icon Picker Dialog */}
+      <IconPicker
+        value={selectedIcon}
+        onSelect={(iconName) => {
+          setSelectedIcon(iconName as string);
+          setShowIconPicker(false);
+        }}
+        isOpen={showIconPicker}
+        onClose={() => setShowIconPicker(false)}
+      />
+    </div>
   );
-}; 
+};

@@ -1,13 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { 
-  FolderOpen, 
-  Calendar, 
-  FileText, 
-  ChevronRight, 
-  Settings,
-  MoreVertical
-} from "lucide-react";
+import { FolderOpen, Calendar, FileText, ChevronRight, Settings, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Project } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { formatTimeAgo } from "@/lib/date-utils";
 import { Pagination } from "@/components/ui/pagination";
@@ -49,20 +43,43 @@ const ITEMS_PER_PAGE = 12;
 
 /**
  * Extracts the project name from the full path
+ *
+ * @param path - Full file system path to the project
+ * @returns Project name (last segment of the path)
  */
 const getProjectName = (path: string): string => {
-  const parts = path.split('/').filter(Boolean);
+  const parts = path.split("/").filter(Boolean);
   return parts[parts.length - 1] || path;
 };
 
 /**
  * ProjectList component - Displays a paginated list of projects with hover animations
- * 
+ *
+ * A comprehensive project listing interface with pagination, hover effects, and
+ * project management features. Shows project metadata including creation date,
+ * session count, and provides access to project settings.
+ *
+ * @param projects - Array of projects to display
+ * @param onProjectClick - Callback when a project card is clicked
+ * @param onProjectSettings - Optional callback for project settings access
+ * @param loading - Whether the list is in loading state
+ * @param className - Additional CSS classes for styling
+ *
  * @example
+ * ```tsx
  * <ProjectList
- *   projects={projects}
- *   onProjectClick={(project) => console.log('Selected:', project)}
+ *   projects={projectList}
+ *   onProjectClick={(project) => {
+ *     console.log('Opening project:', project.path);
+ *     navigateToProject(project);
+ *   }}
+ *   onProjectSettings={(project) => {
+ *     setSelectedProject(project);
+ *     setShowSettings(true);
+ *   }}
+ *   loading={isLoading}
  * />
+ * ```
  */
 export const ProjectList: React.FC<ProjectListProps> = ({
   projects,
@@ -70,19 +87,20 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   onProjectSettings,
   className,
 }) => {
+  const { t } = useI18n();
   const [currentPage, setCurrentPage] = useState(1);
-  
+
   // Calculate pagination
   const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentProjects = projects.slice(startIndex, endIndex);
-  
+
   // Reset to page 1 if projects change
   React.useEffect(() => {
     setCurrentPage(1);
   }, [projects.length]);
-  
+
   return (
     <div className={cn("space-y-4", className)}>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -116,12 +134,12 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                       </Badge>
                     )}
                   </div>
-                  
+
                   <p className="text-sm text-muted-foreground mb-3 font-mono truncate">
                     {project.path}
                   </p>
                 </div>
-                
+
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <div className="flex items-center gap-1">
@@ -133,7 +151,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                       <span>{project.sessions.length}</span>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     {onProjectSettings && (
                       <DropdownMenu>
@@ -150,7 +168,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                             }}
                           >
                             <Settings className="h-4 w-4 mr-2" />
-                            Hooks
+                            {t.projects.hooks}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -163,12 +181,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({
           </motion.div>
         ))}
       </div>
-      
-      <Pagination
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={setCurrentPage}
-      />
+
+      <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
     </div>
   );
-}; 
+};

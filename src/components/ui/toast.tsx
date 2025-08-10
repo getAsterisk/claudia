@@ -1,10 +1,16 @@
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, CheckCircle, AlertCircle, Info } from "lucide-react";
+import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type ToastType = "success" | "error" | "info";
+/**
+ * Available toast notification types
+ */
+export type ToastType = "success" | "error" | "info" | "warning";
 
+/**
+ * Props interface for the Toast component
+ */
 interface ToastProps {
   /**
    * The message to display
@@ -30,7 +36,7 @@ interface ToastProps {
 
 /**
  * Toast component for showing temporary notifications
- * 
+ *
  * @example
  * <Toast
  *   message="File saved successfully"
@@ -51,23 +57,25 @@ export const Toast: React.FC<ToastProps> = ({
       const timer = setTimeout(() => {
         onDismiss?.();
       }, duration);
-      
+
       return () => clearTimeout(timer);
     }
   }, [duration, onDismiss]);
-  
+
   const icons = {
     success: <CheckCircle className="h-4 w-4" />,
     error: <AlertCircle className="h-4 w-4" />,
     info: <Info className="h-4 w-4" />,
+    warning: <AlertTriangle className="h-4 w-4" />,
   };
-  
+
   const colors = {
     success: "text-green-500",
     error: "text-red-500",
     info: "text-primary",
+    warning: "text-yellow-500",
   };
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 50, scale: 0.95 }}
@@ -93,19 +101,35 @@ export const Toast: React.FC<ToastProps> = ({
   );
 };
 
-// Toast container for positioning
+/**
+ * Props interface for the ToastContainer component
+ */
 interface ToastContainerProps {
   children: React.ReactNode;
 }
 
+/**
+ * Container component for positioning toast notifications
+ *
+ * Provides a fixed position container at the bottom of the screen
+ * for displaying toast notifications with proper z-index and animations.
+ *
+ * @param children - Toast components to display
+ *
+ * @example
+ * ```tsx
+ * <ToastContainer>
+ *   <Toast message="Success!" type="success" />
+ *   <Toast message="Error occurred" type="error" />
+ * </ToastContainer>
+ * ```
+ */
 export const ToastContainer: React.FC<ToastContainerProps> = ({ children }) => {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center p-4 pointer-events-none">
       <div className="pointer-events-auto">
-        <AnimatePresence mode="wait">
-          {children}
-        </AnimatePresence>
+        <AnimatePresence mode="wait">{children}</AnimatePresence>
       </div>
     </div>
   );
-}; 
+};

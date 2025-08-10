@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Network, 
-  Globe, 
-  Terminal, 
-  Trash2, 
-  Play, 
+import {
+  Network,
+  Globe,
+  Terminal,
+  Trash2,
+  Play,
   CheckCircle,
   Loader2,
   RefreshCw,
@@ -14,13 +14,15 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
-  Copy
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { api, type MCPServer } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
+import { logger } from "@/lib/logger";
 import { useTrackEvent } from "@/hooks";
-
+import { handleError } from "@/lib/errorHandler";
 interface MCPServerListProps {
   /**
    * List of MCP servers to display
@@ -50,28 +52,37 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
   onServerRemoved,
   onRefresh,
 }) => {
+  const { t } = useI18n();
   const [removingServer, setRemovingServer] = useState<string | null>(null);
   const [testingServer, setTestingServer] = useState<string | null>(null);
   const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set());
   const [copiedServer, setCopiedServer] = useState<string | null>(null);
   const [connectedServers] = useState<string[]>([]);
-  
+
   // Analytics tracking
   const trackEvent = useTrackEvent();
 
   // Group servers by scope
-  const serversByScope = servers.reduce((acc, server) => {
-    const scope = server.scope || "local";
-    if (!acc[scope]) acc[scope] = [];
-    acc[scope].push(server);
-    return acc;
-  }, {} as Record<string, MCPServer[]>);
+  const serversByScope = servers.reduce(
+    (acc, server) => {
+      const scope = server.scope || "local";
+      if (!acc[scope]) acc[scope] = [];
+      acc[scope].push(server);
+      return acc;
+    },
+    {} as Record<string, MCPServer[]>
+  );
 
   /**
    * Toggles expanded state for a server
    */
+  /**
+   * Toggle expanded state for a server
+   *
+   * @param serverName - Name of the server to toggle
+   */
   const toggleExpanded = (serverName: string) => {
-    setExpandedServers(prev => {
+    setExpandedServers((prev) => {
       const next = new Set(prev);
       if (next.has(serverName)) {
         next.delete(serverName);
@@ -89,9 +100,9 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
     try {
       await navigator.clipboard.writeText(command);
       setCopiedServer(serverName);
-      setTimeout(() => setCopiedServer(null), 2000);
+      window.setTimeout(() => setCopiedServer(null), 2000);
     } catch (error) {
-      console.error("Failed to copy command:", error);
+      await handleError("Failed to copy command:", { context: error });
     }
   };
 
@@ -101,21 +112,21 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
   const handleRemoveServer = async (name: string) => {
     try {
       setRemovingServer(name);
-      
+
       // Check if server was connected
       const wasConnected = connectedServers.includes(name);
-      
+
       await api.mcpRemove(name);
-      
+
       // Track server removal
       trackEvent.mcpServerRemoved({
         server_name: name,
         was_connected: wasConnected
       });
-      
+
       onServerRemoved(name);
     } catch (error) {
-      console.error("Failed to remove server:", error);
+      await handleError("Failed to remove server:", { context: error });
     } finally {
       setRemovingServer(null);
     }
@@ -129,15 +140,15 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
       setTestingServer(name);
       const result = await api.mcpTestConnection(name);
       const server = servers.find(s => s.name === name);
-      
+
       // Track connection result - result is a string message
       trackEvent.mcpServerConnected(name, true, server?.transport || 'unknown');
-      
+
       // TODO: Show result in a toast or modal
-      console.log("Test result:", result);
+      logger.debug("Test result:", result);
     } catch (error) {
-      console.error("Failed to test connection:", error);
-      
+      await handleError("Failed to test connection:", { context: error });
+
       trackEvent.mcpConnectionError({
         server_name: name,
         error_type: 'test_failed',
@@ -150,6 +161,12 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
 
   /**
    * Gets icon for transport type
+   */
+  /**
+   * Get icon for transport type
+   *
+   * @param transport - Transport type (stdio, sse, etc.)
+   * @returns Lucide icon component
    */
   const getTransportIcon = (transport: string) => {
     switch (transport) {
@@ -164,6 +181,12 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
 
   /**
    * Gets icon for scope
+   */
+  /**
+   * Get icon for server scope
+   *
+   * @param scope - Server scope (global, user, local)
+   * @returns Lucide icon component
    */
   const getScopeIcon = (scope: string) => {
     switch (scope) {
@@ -184,11 +207,11 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
   const getScopeDisplayName = (scope: string) => {
     switch (scope) {
       case "local":
-        return "Local (Project-specific)";
+        return t.mcp.localProjectSpecific;
       case "project":
-        return "Project (Shared via .mcp.json)";
+        return t.mcp.projectSharedViaMcp;
       case "user":
-        return "User (All projects)";
+        return t.mcp.userAllProjectsScope;
       default:
         return scope;
     }
@@ -200,7 +223,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
   const renderServerItem = (server: MCPServer) => {
     const isExpanded = expandedServers.has(server.name);
     const isCopied = copiedServer === server.name;
-    
+
     return (
       <motion.div
         key={server.name}
@@ -218,16 +241,22 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                 </div>
                 <h4 className="font-medium truncate">{server.name}</h4>
                 {server.status?.running && (
-                  <Badge variant="outline" className="gap-1 flex-shrink-0 border-green-500/50 text-green-600 bg-green-500/10">
+                  <Badge
+                    variant="outline"
+                    className="gap-1 flex-shrink-0 border-green-500/50 text-green-600 bg-green-500/10"
+                  >
                     <CheckCircle className="h-3 w-3" />
-                    Running
+                    {t.mcp.running}
                   </Badge>
                 )}
               </div>
-              
+
               {server.command && !isExpanded && (
                 <div className="flex items-center gap-2">
-                  <p className="text-xs text-muted-foreground font-mono truncate pl-9 flex-1" title={server.command}>
+                  <p
+                    className="text-xs text-muted-foreground font-mono truncate pl-9 flex-1"
+                    title={server.command}
+                  >
                     {server.command}
                   </p>
                   <Button
@@ -237,26 +266,34 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                     className="h-6 px-2 text-xs hover:bg-primary/10"
                   >
                     <ChevronDown className="h-3 w-3 mr-1" />
-                    Show full
+                    {t.mcp.showFull}
                   </Button>
                 </div>
               )}
-              
+
               {server.transport === "sse" && server.url && !isExpanded && (
                 <div className="overflow-hidden">
-                  <p className="text-xs text-muted-foreground font-mono truncate pl-9" title={server.url}>
+                  <p
+                    className="text-xs text-muted-foreground font-mono truncate pl-9"
+                    title={server.url}
+                  >
                     {server.url}
                   </p>
                 </div>
               )}
-              
+
               {Object.keys(server.env).length > 0 && !isExpanded && (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground pl-9">
-                  <span>Environment variables: {Object.keys(server.env).length}</span>
+                  <span>
+                    {t.mcp.environmentVariablesCount.replace(
+                      "{count}",
+                      Object.keys(server.env).length.toString()
+                    )}
+                  </span>
                 </div>
               )}
             </div>
-            
+
             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
               <Button
                 variant="ghost"
@@ -286,7 +323,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
               </Button>
             </div>
           </div>
-          
+
           {/* Expanded Details */}
           {isExpanded && (
             <motion.div
@@ -299,16 +336,16 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
               {server.command && (
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground">Command</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t.mcp.command}</p>
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => copyCommand(server.command!, server.name)}
+                        onClick={() => copyCommand(server.command || "", server.name)}
                         className="h-6 px-2 text-xs hover:bg-primary/10"
                       >
                         <Copy className="h-3 w-3 mr-1" />
-                        {isCopied ? "Copied!" : "Copy"}
+                        {isCopied ? t.mcp.copied : t.mcp.copy}
                       </Button>
                       <Button
                         variant="ghost"
@@ -317,7 +354,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                         className="h-6 px-2 text-xs hover:bg-primary/10"
                       >
                         <ChevronUp className="h-3 w-3 mr-1" />
-                        Hide
+                        {t.mcp.hide}
                       </Button>
                     </div>
                   </div>
@@ -326,10 +363,10 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                   </p>
                 </div>
               )}
-              
+
               {server.args && server.args.length > 0 && (
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Arguments</p>
+                  <p className="text-xs font-medium text-muted-foreground">{t.mcp.arguments}</p>
                   <div className="text-xs font-mono bg-muted/50 p-2 rounded space-y-1">
                     {server.args.map((arg, idx) => (
                       <div key={idx} className="break-all">
@@ -340,19 +377,21 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                   </div>
                 </div>
               )}
-              
+
               {server.transport === "sse" && server.url && (
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">URL</p>
+                  <p className="text-xs font-medium text-muted-foreground">{t.mcp.url}</p>
                   <p className="text-xs font-mono bg-muted/50 p-2 rounded break-all">
                     {server.url}
                   </p>
                 </div>
               )}
-              
+
               {Object.keys(server.env).length > 0 && (
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Environment Variables</p>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t.mcp.environmentVariables}
+                  </p>
                   <div className="text-xs font-mono bg-muted/50 p-2 rounded space-y-1">
                     {Object.entries(server.env).map(([key, value]) => (
                       <div key={key} className="break-all">
@@ -384,9 +423,9 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h3 className="text-base font-semibold">Configured Servers</h3>
+          <h3 className="text-base font-semibold">{t.mcp.configuredServers}</h3>
           <p className="text-sm text-muted-foreground">
-            {servers.length} server{servers.length !== 1 ? "s" : ""} configured
+            {t.mcp.serversConfigured.replace("{count}", servers.length.toString())}
           </p>
         </div>
         <Button
@@ -396,7 +435,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
           className="gap-2 hover:bg-primary/10 hover:text-primary hover:border-primary/50"
         >
           <RefreshCw className="h-4 w-4" />
-          Refresh
+          {t.mcp.refresh}
         </Button>
       </div>
 
@@ -406,10 +445,8 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
           <div className="p-4 bg-primary/10 rounded-full mb-4">
             <Network className="h-12 w-12 text-primary" />
           </div>
-          <p className="text-muted-foreground mb-2 font-medium">No MCP servers configured</p>
-          <p className="text-sm text-muted-foreground">
-            Add a server to get started with Model Context Protocol
-          </p>
+          <p className="text-muted-foreground mb-2 font-medium">{t.mcp.noMcpServersConfigured}</p>
+          <p className="text-sm text-muted-foreground">{t.mcp.addServerToGetStarted}</p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -421,9 +458,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                 <span className="text-muted-foreground/60">({scopeServers.length})</span>
               </div>
               <AnimatePresence>
-                <div className="space-y-2">
-                  {scopeServers.map(renderServerItem)}
-                </div>
+                <div className="space-y-2">{scopeServers.map(renderServerItem)}</div>
               </AnimatePresence>
             </div>
           ))}
@@ -431,4 +466,4 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
       )}
     </div>
   );
-}; 
+};
