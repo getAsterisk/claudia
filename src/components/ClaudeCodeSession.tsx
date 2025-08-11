@@ -30,6 +30,10 @@ import { SlashCommandsManager } from "./SlashCommandsManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SplitPane } from "@/components/ui/split-pane";
+import { FileTree } from "@/components/FileTree";
+import { FileViewer } from "@/components/FileTree/FileViewer";
+import { NoteList, NoteEditor } from "@/components/notes";
+import { useNoteStore } from "@/hooks/useNoteStore";
 import { WebviewPreview } from "./WebviewPreview";
 import type { ClaudeStreamMessage } from "./AgentExecution";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -103,6 +107,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [showPreviewPrompt, setShowPreviewPrompt] = useState(false);
   const [splitPosition, setSplitPosition] = useState(50);
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
+  
+  // Three-pane layout state
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [leftPanelTab, setLeftPanelTab] = useState<'files' | 'notes'>('files');
+  const [leftPanelWidth, setLeftPanelWidth] = useState(300);
+  const [middlePanelWidth, setMiddlePanelWidth] = useState(400);
   
   // Add collapsed state for queued prompts
   const [queuedPromptsCollapsed, setQueuedPromptsCollapsed] = useState(false);
@@ -422,6 +432,34 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(`Failed to select directory: ${errorMessage}`);
     }
+  };
+
+  // Helper function to get relative path
+  const getRelativePath = (absolutePath: string): string => {
+    if (!projectPath || !absolutePath.startsWith(projectPath)) {
+      return absolutePath;
+    }
+    const relativePath = absolutePath.slice(projectPath.length);
+    return relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+  };
+
+  // Handle file tree interactions
+  const handleFileClick = (filePath: string) => {
+    setSelectedFilePath(filePath);
+    const relativePath = getRelativePath(filePath);
+    // Send @relative-path to chat
+    floatingPromptRef.current?.setPrompt(`@${relativePath}`);
+  };
+
+  const handleAddToChat = (filePath: string) => {
+    const relativePath = getRelativePath(filePath);
+    // Append @relative-path to existing prompt
+    floatingPromptRef.current?.appendToPrompt(`@${relativePath}`);
+  };
+
+  // Handle FileViewer sending text to chat
+  const handleSendTextToChat = (text: string) => {
+    floatingPromptRef.current?.appendToPrompt(text);
   };
 
   const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus") => {
@@ -1384,53 +1422,140 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           </div>
         </motion.div>
 
-        {/* Main Content Area */}
+        {/* Three-Pane Layout */}
         <div className={cn(
-          "flex-1 overflow-hidden transition-all duration-300",
+          "flex-1 overflow-hidden transition-all duration-300 flex",
           showTimeline && "sm:mr-96"
         )}>
-          {showPreview ? (
-            // Split pane layout when preview is active
-            <SplitPane
-              left={
-                <div className="h-full flex flex-col">
-                  {projectPathInput}
-                  {messagesList}
-                </div>
-              }
-              right={
-                <WebviewPreview
-                  initialUrl={previewUrl}
-                  onClose={handleClosePreview}
-                  isMaximized={isPreviewMaximized}
-                  onToggleMaximize={handleTogglePreviewMaximize}
-                  onUrlChange={handlePreviewUrlChange}
-                />
-              }
-              initialSplit={splitPosition}
-              onSplitChange={setSplitPosition}
-              minLeftWidth={400}
-              minRightWidth={400}
-              className="h-full"
-            />
-          ) : (
-            // Original layout when no preview
-            <div className="h-full flex flex-col max-w-5xl mx-auto">
-              {projectPathInput}
-              {messagesList}
+          {/* Left Panel - FileTree + Notes */}
+          <div 
+            className="border-r border-border bg-background flex-shrink-0" 
+            style={{ width: leftPanelWidth }}
+          >
+            <div className="h-full flex flex-col">
+              {/* Tab Headers */}
+              <div className="flex border-b border-border bg-muted/50">
+                <button
+                  className={cn(
+                    "flex-1 px-4 py-2 text-sm font-medium transition-colors",
+                    leftPanelTab === 'files' 
+                      ? "bg-background text-foreground border-b-2 border-primary" 
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  onClick={() => setLeftPanelTab('files')}
+                >
+                  Files
+                </button>
+                <button
+                  className={cn(
+                    "flex-1 px-4 py-2 text-sm font-medium transition-colors",
+                    leftPanelTab === 'notes' 
+                      ? "bg-background text-foreground border-b-2 border-primary" 
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  onClick={() => setLeftPanelTab('notes')}
+                >
+                  Notes
+                </button>
+              </div>
               
-              {isLoading && messages.length === 0 && (
-                <div className="flex items-center justify-center h-full">
-                  <div className="flex items-center gap-3">
-                    <div className="rotating-symbol text-primary" />
-                    <span className="text-sm text-muted-foreground">
-                      {session ? "Loading session history..." : "Initializing Claude Code..."}
-                    </span>
+              {/* Tab Content */}
+              <div className="flex-1 overflow-hidden">
+                {leftPanelTab === 'files' ? (
+                  <FileTree 
+                    currentFolder={projectPath}
+                    onFileClick={handleFileClick}
+                    onAddToChat={handleAddToChat}
+                  />
+                ) : (
+                  <div className="h-full overflow-hidden">
+                    <NoteList />
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          )}
+          </div>
+
+          {/* Middle Panel - FileViewer or NoteEditor */}
+          <div 
+            className="border-r border-border bg-background flex-shrink-0" 
+            style={{ width: middlePanelWidth }}
+          >
+            {leftPanelTab === 'notes' ? (
+              <div className="h-full">
+                <NoteEditor />
+              </div>
+            ) : selectedFilePath ? (
+              <FileViewer 
+                filePath={selectedFilePath}
+                onClose={() => setSelectedFilePath(null)}
+                onSendToChat={handleSendTextToChat}
+                addToNotepad={(text, source) => {
+                  // Get note store methods
+                  const { currentNoteId, getCurrentNote, createNoteFromContent, addContentToNote } = useNoteStore.getState();
+                  
+                  if (currentNoteId && getCurrentNote()) {
+                    // Add to existing note
+                    addContentToNote(currentNoteId, text, source);
+                  } else {
+                    // Create new note
+                    createNoteFromContent(text, source);
+                  }
+                  
+                  // Switch to notes tab to show the result
+                  setLeftPanelTab('notes');
+                }}
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground">
+                <div className="text-center">
+                  <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Select a file to view its contents</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Panel - Chat */}
+          <div className="flex-1 flex flex-col bg-background">
+            {projectPathInput}
+            
+            {showPreview ? (
+              // Split pane for chat + preview
+              <SplitPane
+                left={messagesList}
+                right={
+                  <WebviewPreview
+                    initialUrl={previewUrl}
+                    onClose={handleClosePreview}
+                    isMaximized={isPreviewMaximized}
+                    onToggleMaximize={handleTogglePreviewMaximize}
+                    onUrlChange={handlePreviewUrlChange}
+                  />
+                }
+                initialSplit={splitPosition}
+                onSplitChange={setSplitPosition}
+                minLeftWidth={300}
+                minRightWidth={400}
+                className="flex-1"
+              />
+            ) : (
+              <>
+                {messagesList}
+                
+                {isLoading && messages.length === 0 && (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="flex items-center gap-3">
+                      <div className="rotating-symbol text-primary" />
+                      <span className="text-sm text-muted-foreground">
+                        {session ? "Loading session history..." : "Initializing Claude Code..."}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         {/* Floating Prompt Input - Always visible */}
@@ -1554,9 +1679,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           )}
 
           <div className={cn(
-            "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
+            "fixed bottom-0 transition-all duration-300 z-50",
             showTimeline && "sm:right-96"
-          )}>
+          )}
+          style={{ 
+            left: leftPanelWidth + middlePanelWidth,
+            right: showTimeline ? '24rem' : 0
+          }}>
             <FloatingPromptInput
               ref={floatingPromptRef}
               onSend={handleSendPrompt}
