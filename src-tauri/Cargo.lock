@@ -1782,6 +1782,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tokio",
+ "url",
  "uuid",
  "walkdir",
  "which",
